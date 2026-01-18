@@ -9,19 +9,13 @@ from datetime import datetime
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # Pega o dicionário dos secrets
-    creds_info = dict(st.secrets["gcp_service_account"])
-    
-    # CONSERTO DEFINITIVO PARA JWT SIGNATURE:
-    # Se a chave vier com aspas duplas escapadas ou quebras de linha literais, isso limpa tudo.
-    if "private_key" in creds_info:
-        # Substitui a representação de texto '\n' por quebras de linha reais
-        key = creds_info["private_key"].replace("\\n", "\n")
-        # Remove possíveis aspas extras que o TOML às vezes insere
-        key = key.strip('"').strip("'")
-        creds_info["private_key"] = key
+    # st.secrets retorna um objeto que se comporta como dicionário
+    creds_dict = {}
+    for key, value in st.secrets["gcp_service_account"].items():
+        creds_dict[key] = value
 
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+    # O from_json_keyfile_dict aceita a chave com quebras de linha reais (feitas pelas aspas triplas)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
 def load_data():
@@ -175,6 +169,7 @@ st.sidebar.markdown(f"**Nível:** {st.session_state.nivel_usuario_nome}")
 if st.sidebar.button("Sair / Trocar Usuário"):
     st.session_state.autenticado = False
     st.rerun()
+
 
 
 
