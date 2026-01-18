@@ -9,13 +9,10 @@ from datetime import datetime
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # Carrega os dados do painel Secrets do Streamlit
+    # Simplesmente carrega o dicionário dos secrets
     creds_info = dict(st.secrets["gcp_service_account"])
     
-    # CORREÇÃO CRUCIAL: Garante que as quebras de linha da chave privada sejam lidas corretamente
-    if "private_key" in creds_info:
-        creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
-    
+    # Se a chave foi colada com aspas triplas, o gspread aceita ela direto
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
     return gspread.authorize(creds)
 
@@ -170,3 +167,4 @@ st.sidebar.markdown(f"**Nível:** {st.session_state.nivel_usuario_nome}")
 if st.sidebar.button("Sair / Trocar Usuário"):
     st.session_state.autenticado = False
     st.rerun()
+
