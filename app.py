@@ -9,13 +9,34 @@ from datetime import datetime
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # st.secrets retorna um objeto que se comporta como dicionário
-    creds_dict = {}
-    for key, value in st.secrets["gcp_service_account"].items():
-        creds_dict[key] = value
-
-    # O from_json_keyfile_dict aceita a chave com quebras de linha reais (feitas pelas aspas triplas)
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    # Puxa os dados do Secret
+    creds_info = dict(st.secrets["gcp_service_account"])
+    
+    # --- LIMPEZA AVANÇADA DA CHAVE ---
+    key = creds_info["private_key"]
+    
+    # 1. Remove aspas extras que podem ter vindo do TOML
+    key = key.strip().strip('"').strip("'")
+    
+    # 2. Se a chave estiver em uma linha só com \n literais, converte para quebras reais
+    if "\\n" in key:
+        key = key.replace("\\n", "\n")
+    
+    # 3. CORREÇÃO DO ERRO DE BASE64 (Multiple of 4):
+    # O erro acontece por causa de espaços ou quebras de linha erradas dentro do bloco da chave.
+    # Vamos remontar a chave garantindo que cada linha de dados esteja limpa.
+    lines = key.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        stripped_line = line.strip()
+        if stripped_line:
+            cleaned_lines.append(stripped_line)
+    
+    # Junta tudo novamente com quebras de linha limpas
+    creds_info["private_key"] = "\n".join(cleaned_lines)
+    
+    # Tenta autorizar
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
     return gspread.authorize(creds)
 
 def load_data():
@@ -169,6 +190,7 @@ st.sidebar.markdown(f"**Nível:** {st.session_state.nivel_usuario_nome}")
 if st.sidebar.button("Sair / Trocar Usuário"):
     st.session_state.autenticado = False
     st.rerun()
+
 
 
 
