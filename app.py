@@ -9,10 +9,17 @@ from datetime import datetime
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # Simplesmente carrega o dicionário dos secrets
+    # Criamos uma cópia para não mexer no objeto original
     creds_info = dict(st.secrets["gcp_service_account"])
     
-    # Se a chave foi colada com aspas triplas, o gspread aceita ela direto
+    # LIMPEZA DEFINITIVA: 
+    # Remove espaços, quebras de linha e garante que a chave seja uma string limpa
+    raw_key = creds_info["private_key"]
+    
+    # Se a chave foi colada com \n literais, substitui. Se for quebra real, limpa espaços.
+    cleaned_key = raw_key.replace("\\n", "\n").strip()
+    creds_info["private_key"] = cleaned_key
+    
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
     return gspread.authorize(creds)
 
@@ -167,4 +174,5 @@ st.sidebar.markdown(f"**Nível:** {st.session_state.nivel_usuario_nome}")
 if st.sidebar.button("Sair / Trocar Usuário"):
     st.session_state.autenticado = False
     st.rerun()
+
 
