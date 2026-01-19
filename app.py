@@ -10,24 +10,25 @@ import base64
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # Criamos uma cópia limpa das credenciais
+    # Verifica se a seção existe para evitar erro de 'KeyError'
+    if "gcp_service_account" not in st.secrets:
+        st.error("A seção [gcp_service_account] não foi encontrada nos Secrets do Streamlit.")
+        st.stop()
+        
     creds_info = dict(st.secrets["gcp_service_account"])
     
-    # --- TRATAMENTO AGRESSIVO PARA EVITAR ERRO DE BASE64 ---
-    key = creds_info["private_key"]
-    
-    # 1. Remove qualquer aspa ou espaço que tenha vindo na colagem
-    key = key.strip().strip('"').strip("'")
-    
-    # 2. Converte o texto "\n" em quebras de linha reais
-    key = key.replace("\\n", "\n")
-    
-    # 3. Remove espaços em branco no final de cada linha interna da chave
-    # (Isso é o que causa o erro de 'multiple of 4')
+    # Verifica se o e-mail do cliente existe
+    if "client_email" not in creds_info:
+        st.error("O campo 'client_email' está em falta nos Secrets. Por favor, verifique a colagem.")
+        st.stop()
+
+    # Limpeza da chave privada
+    key = creds_info["private_key"].replace("\\n", "\n")
     lines = [line.strip() for line in key.split('\n') if line.strip()]
-    key = "\n".join(lines)
+    creds_info["private_key"] = "\n".join(lines)
     
-    creds_info["private_key"] = key
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+    return gspread.authorize(creds)
     
     try:
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
@@ -164,6 +165,7 @@ st.dataframe(df_filtrado[[col_nome_ev, 'Data Formatada', 'Nível', 'Voluntário 
 if st.sidebar.button("Sair"):
     st.session_state.autenticado = False
     st.rerun()
+
 
 
 
