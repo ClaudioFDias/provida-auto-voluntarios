@@ -5,43 +5,36 @@ import pandas as pd
 import textwrap
 import re
 
-# --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Portal de Voluntários ProVida", layout="wide")
-
 @st.cache_resource
 def get_gspread_client():
-    """Autenticação oficial usando as 21 partes da nova chave."""
     try:
-        # Reconstrução exata das 21 partes (S1 a S21)
+        # 1. Reconstituir a Chave Privada
         partes = [f"S{i}" for i in range(1, 22)]
-        chave_full = ""
-        for p in partes:
-            if p in st.secrets:
-                # Limpeza de qualquer resíduo para garantir a integridade
-                chave_full += re.sub(r'[^A-Za-z0-9+/=]', '', st.secrets[p])
+        chave_full = "".join([re.sub(r'[^A-Za-z0-9+/=]', '', st.secrets[p]) for p in partes])
         
-        # Formatação para o padrão PEM exigido pelo Google
+        # Formatar para o padrão PEM
         key_lines = textwrap.wrap(chave_full, 64)
         formatted_key = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(key_lines) + "\n-----END PRIVATE KEY-----\n"
         
+        # 2. Montar o dicionário pegando TUDO do Secrets
         creds_info = {
-            "type": "service_account",
-            "project_id": "chromatic-tree-279819",
+            "type": st.secrets["TYPE"],
+            "project_id": st.secrets["PROJECT_ID"],
             "private_key_id": st.secrets["PRIVATE_KEY_ID"],
             "private_key": formatted_key,
-            "client_email": "volutarios@chromatic-tree-279819.iam.gserviceaccount.com",
-            "client_id": "110888986067806154751",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/volutarios%40chromatic-tree-279819.iam.gserviceaccount.com"
+            "client_email": st.secrets["CLIENT_EMAIL"],
+            "client_id": st.secrets["CLIENT_ID"],
+            "auth_uri": st.secrets["AUTH_URI"],
+            "token_uri": st.secrets["TOKEN_URI"],
+            "auth_provider_x509_cert_url": st.secrets["AUTH_PROVIDER_X509_CERT_URL"],
+            "client_x509_cert_url": st.secrets["CLIENT_X509_CERT_URL"]
         }
         
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
         return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"Erro na Autenticação: {e}")
+        st.error(f"Erro ao carregar credenciais do Secrets: {e}")
         st.stop()
 
 # --- 2. MAPEAMENTO DE NÍVEIS ---
@@ -105,3 +98,4 @@ except Exception as e:
 if st.sidebar.button("Sair"):
     st.session_state.autenticado = False
     st.rerun()
+
