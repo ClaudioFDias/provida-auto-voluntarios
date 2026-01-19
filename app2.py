@@ -1,60 +1,58 @@
 import streamlit as st
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 import re
-import base64
+import textwrap
 
-st.set_page_config(page_title="Super Validador 20", layout="wide")
-st.title("🔬 Microscópio de Chave (20 Segmentos)")
+st.set_page_config(page_title="Validador de Assinatura JWT", layout="wide")
+st.title("🧪 Teste de Conexão em Tempo Real")
 
-def analisar():
-    partes = [f"S{i}" for i in range(1, 21)]
-    chave_full = ""
-    
-    # 1. Tabela de Verificação Unitária
-    st.subheader("📊 Verificação de 1 a 20")
-    col_a, col_b = st.columns(2)
-    
-    for i, nome in enumerate(partes):
-        target_col = col_a if i < 10 else col_b
-        if nome in st.secrets:
-            val = st.secrets[nome].strip()
-            limpo = re.sub(r'[^A-Za-z0-9+/=]', '', val)
-            chave_full += limpo
-            target_col.write(f"**{nome}:** {len(limpo)} chars")
-        else:
-            target_col.error(f"**{nome}:** ❌ AUSENTE")
-
-    st.divider()
-
-    # 2. Análise por Blocos (10 em 10)
-    st.subheader("📦 Análise por Blocos")
-    bloco1 = "".join([re.sub(r'[^A-Za-z0-9+/=]', '', st.secrets.get(f"S{i}", "")) for i in range(1, 11)])
-    bloco2 = "".join([re.sub(r'[^A-Za-z0-9+/=]', '', st.secrets.get(f"S{i}", "")) for i in range(11, 21)])
-    
-    c1, c2 = st.columns(2)
-    c1.metric("Bloco 1 (S1-S10)", len(bloco1))
-    c2.metric("Bloco 2 (S11-S20)", len(bloco2))
-
-    st.divider()
-
-    # 3. Veredito Final
-    st.subheader("⚖️ Veredito Final")
-    total = len(chave_full)
-    resto = total % 4
-    
-    st.write(f"**Total acumulado:** {total} caracteres")
-    
-    if resto == 0:
-        st.success("✅ PERFEITO! A chave é múltipla de 4.")
-    else:
-        st.error(f"❌ ERRO: Sobram {resto} caracteres. (Total: {total})")
-        # Identificando o caractere intruso
-        st.write(f"Últimos 5 caracteres da chave: `{chave_full[-5:]}`")
-
+def testar_conexao_completa():
     try:
-        base64.b64decode(chave_full)
-        st.success("✅ Base64 matematicamente válido!")
-    except Exception as e:
-        st.error(f"❌ Falha na decodificação: {e}")
+        # 1. Reconstrução
+        st.subheader("1. Reconstruindo a Chave...")
+        partes = [f"S{i}" for i in range(1, 21)]
+        chave_full = ""
+        for nome in partes:
+            if nome in st.secrets:
+                chave_full += re.sub(r'[^A-Za-z0-9+/=]', '', st.secrets[nome])
+        
+        st.write(f"✅ Chave reconstruída com {len(chave_full)} caracteres.")
 
-if st.button("🔍 Rodar Diagnóstico"):
-    analisar()
+        # 2. Montagem do PEM
+        # Cortamos em 1620 por segurança (conforme nosso último sucesso no microscópio)
+        chave_final = chave_full[:1620]
+        key_lines = textwrap.wrap(chave_final, 64)
+        formatted_key = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(key_lines) + "\n-----END PRIVATE KEY-----\n"
+
+        # 3. Tentativa de Autenticação
+        st.subheader("2. Tentando Autenticar no Google...")
+        
+        creds_info = {
+            "type": "service_account",
+            "project_id": "chromatic-tree-279819",
+            "private_key_id": "866d21c6b1ad8efba9661a2a15b47b658d9e1573",
+            "private_key": formatted_key,
+            "client_email": "volutarios@chromatic-tree-279819.iam.gserviceaccount.com",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+        
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+        client = gspread.authorize(creds)
+        
+        st.success("🔥 SUCESSO! O Google aceitou a assinatura da chave.")
+
+        # 4. Teste de Acesso à Planilha
+        st.subheader("3. Testando Acesso à Planilha...")
+        sh = client.open_by_key("1paP1ZB2ufwCc95T_gdCR92kx-suXbROnDfbWMC_ka0c")
+        st.write(f"✅ Planilha aberta: **{sh.title}**")
+        
+    except Exception as e:
+        st.error(f"❌ Falha no Teste: {e}")
+        if "invalid_grant" in str(e):
+            st.warning("⚠️ O erro 'Invalid JWT Signature' confirma que o conteúdo da chave está incorreto ou ela foi revogada no Google Cloud.")
+            st.info("Ação recomendada: Gere uma nova chave JSON no console do Google e substitua os S1-S20.")
+
+if st.button("🚀 Rodar Teste de Fogo"):
+    testar_conexao_completa()
