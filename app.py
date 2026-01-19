@@ -9,32 +9,36 @@ from datetime import datetime
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # Busca o que é secreto no st.secrets
     try:
+        # Pega a chave e o email
         key_body = st.secrets["PRIVATE_KEY_BODY"]
         email = st.secrets["CLIENT_EMAIL"]
-    except KeyError:
-        st.error("Erro: Segredos 'PRIVATE_KEY_BODY' ou 'CLIENT_EMAIL' não encontrados no painel do Streamlit.")
+        
+        # --- LIMPEZA AGRESSIVA ---
+        # Remove espaços, quebras de linha e aspas que podem ter vindo na colagem
+        clean_key = key_body.replace("\n", "").replace(" ", "").strip().strip('"').strip("'")
+        
+        # Reconstrói o dicionário
+        creds_info = {
+            "type": "service_account",
+            "project_id": "chromatic-tree-279819",
+            "private_key_id": "866d21c6b1ad8efba9661a2a15b47b658d9e1573",
+            "private_key": f"-----BEGIN PRIVATE KEY-----\n{clean_key}\n-----END PRIVATE KEY-----\n",
+            "client_email": email,
+            "client_id": "110888986067806154751",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{email.replace('@', '%40')}",
+            "universe_domain": "googleapis.com"
+        }
+        
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+        return gspread.authorize(creds)
+        
+    except Exception as e:
+        st.error(f"Erro na conexão: {e}")
         st.stop()
-
-    # Reconstrói o JSON de credenciais internamente
-    creds_info = {
-        "type": "service_account",
-        "project_id": "chromatic-tree-279819",
-        "private_key_id": "866d21c6b1ad8efba9661a2a15b47b658d9e1573",
-        "private_key": f"-----BEGIN PRIVATE KEY-----\n{key_body}\n-----END PRIVATE KEY-----\n",
-        "client_email": email,
-        "client_id": "110888986067806154751",
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-        "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{email.replace('@', '%40')}",
-        "universe_domain": "googleapis.com"
-    }
-    
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
-    return gspread.authorize(creds)
-
 def load_data():
     client = get_gspread_client()
     # Seu ID da Planilha
@@ -153,3 +157,4 @@ except Exception as e:
 if st.sidebar.button("Sair / Trocar Usuário"):
     st.session_state.autenticado = False
     st.rerun()
+
