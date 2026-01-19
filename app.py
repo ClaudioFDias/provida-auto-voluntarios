@@ -9,24 +9,26 @@ import base64
 @st.cache_resource
 def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    
+    # Criamos uma cópia para não afetar o st.secrets original
     creds_info = dict(st.secrets["gcp_service_account"])
     
+    raw_key = creds_info["private_key"]
+    
+    # LIMPEZA: Se a chave vier com \n escrito (texto), transforma em quebra de linha real
+    if "\\n" in raw_key:
+        creds_info["private_key"] = raw_key.replace("\\n", "\n")
+    
+    # Remove aspas extras que podem ter vindo da colagem
+    creds_info["private_key"] = creds_info["private_key"].strip().strip('"').strip("'")
+    
     try:
-        raw_key = creds_info["private_key"].strip()
-        
-        if raw_key.startswith("LS0t"):
-            # O truque está aqui: adicionar o strip e o decode correto
-            decoded_bytes = base64.b64decode(raw_key, validate=False)
-            creds_info["private_key"] = decoded_bytes.decode("utf-8").strip()
-        else:
-            creds_info["private_key"] = raw_key.replace("\\n", "\n")
-            
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+        return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"Erro ao processar chave de segurança: {e}")
+        st.error(f"Erro na autorização do Google: {e}")
         st.stop()
-
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
-    return gspread.authorize(creds)
+        
 
 def load_data():
     client = get_gspread_client()
@@ -156,4 +158,5 @@ st.dataframe(df_filtrado[[col_nome_ev, 'Data Formatada', 'Nível', 'Voluntário 
 if st.sidebar.button("Sair"):
     st.session_state.autenticado = False
     st.rerun()
+
 
