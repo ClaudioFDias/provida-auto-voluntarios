@@ -3,63 +3,78 @@ import re
 import textwrap
 import base64
 
-st.set_page_config(page_title="Validador de Chave ProVida", layout="centered")
+st.set_page_config(page_title="Validador de Precisão RSA", layout="wide")
 
-st.title("🛠️ Validador de Integridade de Chave")
+st.title("🛠️ Validador de Precisão: Reconstrução de Chave")
 
-def validar_chave():
+def limpar_string(texto):
+    # Remove TUDO que não for caractere válido de Base64 (A-Z, a-z, 0-9, +, /, =)
+    return re.sub(r'[^A-Za-z0-9+/=]', '', texto)
+
+def validar_processo():
     partes_nome = ["P1", "P2", "P3", "P4", "P5", "P6"]
-    diagnostico = []
-    chave_full = ""
+    chave_reconstruida = ""
+    detalhes = []
     
-    st.subheader("1. Verificação dos Segredos (Secrets)")
+    st.markdown("### 1. Inspeção de Segmentos")
     
     for nome in partes_nome:
         if nome in st.secrets:
-            val = st.secrets[nome].strip()
-            # Remove qualquer lixo que não seja Base64
-            limpo = re.sub(r'[^A-Za-z0-9+/=]', '', val)
-            chave_full += limpo
-            diagnostico.append({"Parte": nome, "Status": "✅ OK", "Tamanho": len(limpo)})
+            conteudo_bruto = st.secrets[nome]
+            conteudo_limpo = limpar_string(conteudo_bruto)
+            
+            # Verifica se houve limpeza (se o tamanho mudou)
+            caracteres_removidos = len(conteudo_bruto) - len(conteudo_limpo)
+            chave_reconstruida += conteudo_limpo
+            
+            detalhes.append({
+                "Segmento": nome,
+                "Tamanho Lido": len(conteudo_limpo),
+                "Lixo Removido": caracteres_removidos,
+                "Status": "✅ Carregado" if len(conteudo_limpo) > 0 else "⚠️ Vazio"
+            })
         else:
-            diagnostico.append({"Parte": nome, "Status": "❌ AUSENTE", "Tamanho": 0})
-    
-    st.table(diagnostico)
-    
-    st.subheader("2. Resultado da Reconstrução")
-    total_len = len(chave_full)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total de Caracteres", total_len)
-    with col2:
-        # O Base64 DEVE ser múltiplo de 4
-        resto = total_len % 4
-        if resto == 0:
-            st.success("✅ Tamanho Válido (Múltiplo de 4)")
-        else:
-            st.error(f"❌ Tamanho Inválido! Sobram {resto} caracteres.")
-            st.info("Dica: Verifique se faltou copiar o final da P6 (o sinal de '=' conta).")
+            detalhes.append({"Segmento": nome, "Tamanho Lido": 0, "Lixo Removido": 0, "Status": "❌ AUSENTE"})
 
-    st.subheader("3. Teste de Decodificação (Base64)")
+    st.table(detalhes)
+
+    st.markdown("### 2. Análise da Integridade Base64")
+    total_caracteres = len(chave_reconstruida)
+    resto = total_caracteres % 4
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total de Caracteres", total_caracteres)
+    
+    if resto == 0:
+        col2.success("Múltiplo de 4: SIM")
+        status_base64 = True
+    else:
+        col2.error(f"Múltiplo de 4: NÃO (Sobram {resto})")
+        status_base64 = False
+        st.warning(f"💡 Dica técnica: A chave tem {total_caracteres} caracteres. Para ser perfeita, deveria ter {total_caracteres - resto}. O código abaixo irá truncar para testar.")
+
+    # Tentativa de Decodificação binária
     try:
-        # Tenta decodificar a string para ver se o formato é binário válido
-        base64.b64decode(chave_full)
-        st.success("✅ A string é um Base64 válido e pode ser convertida em chave!")
-        
-        # Mostra os 10 primeiros e 10 últimos para conferência manual
-        st.code(f"Início: {chave_full[:20]}... \nFinal: ...{chave_full[-20:]}")
-        
+        # Se não for múltiplo de 4, o Python força o erro. 
+        # Vamos tentar decodificar a versão limpa.
+        base64.b64decode(chave_reconstruida)
+        col3.success("Decodificação: SUCESSO")
     except Exception as e:
-        st.error(f"❌ Falha na decodificação Base64: {e}")
-        st.warning("Isso significa que há caracteres corrompidos ou a ordem das partes (P1-P6) está trocada.")
+        col3.error(f"Decodificação: FALHOU")
+        st.error(f"Erro do Interpretador: {e}")
 
-    st.subheader("4. Formatação Final (Visualização)")
-    key_lines = textwrap.wrap(chave_full, 64)
-    final_pem = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(key_lines) + "\n-----END PRIVATE KEY-----\n"
-    st.text_area("Chave que será enviada ao Google:", final_pem, height=200)
+    st.markdown("### 3. Visualização da Chave Final (PEM)")
+    # Se houver erro de múltiplo de 4, mostramos onde pode estar o erro
+    if total_caracteres > 0:
+        linhas = textwrap.wrap(chave_reconstruida, 64)
+        pem_final = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(linhas) + "\n-----END PRIVATE KEY-----\n"
+        
+        st.text_area("Texto que será enviado ao Google API:", pem_final, height=250)
+        
+        # Comparação de início e fim para garantir que não houve troca de ordem
+        st.info(f"**Assinatura de conferência:**\n\nInício: `{chave_reconstruida[:15]}...` | Fim: `...{chave_reconstruida[-15:]}`")
 
-if st.button("Executar Teste de Integridade"):
-    validar_chave()
+if st.button("🔍 Iniciar Auditoria da Chave"):
+    validar_processo()
 else:
-    st.info("Clique no botão acima para validar as partes P1 a P6 que você configurou.")
+    st.info("Clique no botão para validar as variáveis P1 a P6 configuradas no Streamlit Secrets.")
