@@ -57,7 +57,6 @@ def aplicar_estilo_linha(row):
 # --- 3. DIALOG ---
 @st.dialog("Confirmar")
 def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev):
-    # Aqui a data aparece como DD/MM no resumo
     data_formatada = row['Data_Dt'].strftime('%d/%m')
     st.write(f"**{row[col_ev]}**")
     st.write(f"{data_formatada} ({row['Dia_da_Semana']})")
@@ -90,10 +89,14 @@ try:
     sheet, df = load_data()
     col_ev = next((c for c in df.columns if 'Evento' in c), 'Evento')
     
+    # Datas e Processamento
     df['Data_Dt'] = pd.to_datetime(df['Data Específica'], errors='coerce')
     df['Dia_da_Semana'] = df['Data_Dt'].dt.weekday.map(dias_semana)
     df['Niv_N'] = df['Nível'].astype(str).str.strip().map(mapa_niveis).fillna(99)
     df['Status'] = df.apply(definir_status, axis=1)
+
+    # --- ORDENAÇÃO POR DATA (CRONOLÓGICA) ---
+    df = df.sort_values(by='Data_Dt').reset_index(drop=False) # Mantemos o index original para referência na planilha
 
     st.title(f"🤝 Olá, {st.session_state.nome_usuario.split()[0]}")
 
@@ -104,7 +107,7 @@ try:
             st.session_state.autenticado = False
             st.rerun()
 
-    # Filtro
+    # Filtro de permissão e data selecionada
     df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Dt'].dt.date >= f_dat)].copy()
     if so_vagas: df_f = df_f[df_f['Status'] != "🟢 Completo"]
 
@@ -112,24 +115,22 @@ try:
     st.subheader("📝 Inscrição Rápida")
     v_l = df_f[df_f['Status'] != "🟢 Completo"].copy()
     if not v_l.empty:
-        # Data formatada para DD/MM no dropdown
         v_l['label'] = v_l.apply(lambda x: f"{x['Data_Dt'].strftime('%d/%m')} | {x[col_ev][:12]}.. | {x['Status']}", axis=1)
         esc = st.selectbox("Escolha:", v_l['label'].tolist(), index=None, placeholder="Selecione...")
         if esc:
-            idx = v_l[v_l['label'] == esc].index[0]
+            idx_vagas = v_l[v_l['label'] == esc].index[0]
             if st.button("Inscrever-se", type="primary"):
-                lin = int(idx) + 2
-                v1_val = str(sheet.cell(lin, 7).value).strip()
-                confirmar_dialog(sheet, lin, v_l.loc[idx], ("V1" if v1_val == "" else "V2"), (7 if v1_val == "" else 8), col_ev)
+                # Pegamos o index original que foi preservado na coluna 'index'
+                linha_planilha = int(v_l.loc[idx_vagas, 'index']) + 2
+                val_v1 = str(sheet.cell(linha_planilha, 7).value).strip()
+                confirmar_dialog(sheet, linha_planilha, v_l.loc[idx_vagas], ("V1" if val_v1 == "" else "V2"), (7 if val_v1 == "" else 8), col_ev)
     
     # --- 7. ESCALA (TABELA) ---
     st.divider()
     st.subheader("📋 Escala")
     
     df_show = df_f.copy()
-    # Criando a coluna de exibição DD/MM
     df_show['Data'] = df_show['Data_Dt'].dt.strftime('%d/%m')
-    
     df_show = df_show.rename(columns={col_ev: 'Evento', 'Dia_da_Semana': 'Dia', 'Voluntário 1': 'V1', 'Voluntário 2': 'V2'})
     cols_display = ['Status', 'Evento', 'Data', 'Dia', 'V1', 'V2']
 
@@ -145,9 +146,12 @@ try:
         r_idx = sel.selection.rows[0]
         r_sel = df_f.iloc[r_idx]
         if "Completo" not in r_sel['Status']:
-            lin_orig = int(r_sel.name) + 2
+            # Pegamos o index original preservado
+            linha_orig = int(r_sel['index']) + 2
             v1_a = str(r_sel['Voluntário 1']).strip()
-            confirmar_dialog(sheet, lin_orig, r_sel, ("V1" if v1_a == "" else "V2"), (7 if v1_a == "" else 8), col_ev)
+            confirmar_dialog(sheet, linha_orig, r_sel, ("V1" if v1_a == "" else "V2"), (7 if v1_a == "" else 8), col_ev)
+        else:
+            st.warning("Escala já preenchida.")
 
 except Exception as e:
-    st.error("Erro ao carregar dados.")
+    st.error(f"Erro ao carregar dados: {e}")
