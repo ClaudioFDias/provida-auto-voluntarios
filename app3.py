@@ -6,7 +6,7 @@ from datetime import datetime
 import textwrap
 import re
 
-# --- 1. CONEXÃO COM GOOGLE SHEETS ---
+# --- 1. CONEXÃO ---
 @st.cache_resource
 def get_gspread_client():
     try:
@@ -36,7 +36,7 @@ def load_data():
     df.columns = [col.strip() for col in df.columns]
     return sheet, df
 
-# --- 2. CONFIGURAÇÕES E ESTILO ---
+# --- 2. CONFIGS E ESTILO ---
 mapa_niveis = {"Nenhum": 0, "Básico": 1, "Av.1": 2, "Introdução": 3, "Av.2": 4, "Av.2|": 5, "Av.3": 6, "Av.3|": 7, "Av.4": 8}
 dias_semana = {0: "Seg", 1: "Ter", 2: "Qua", 3: "Qui", 4: "Sex", 5: "Sáb", 6: "Dom"}
 
@@ -48,21 +48,19 @@ def definir_status(row):
     return "🟢 Completo"
 
 def aplicar_estilo_linha(row):
-    # O estilo agora olha para o texto exato da coluna Status
     status = str(row.get('Status', ''))
-    if "2 Vagas" in status:
-        bg_color = '#FFEBEE' # Vermelho claro
-    elif "1 Vaga" in status:
-        bg_color = '#FFF9C4' # Amarelo claro
-    else:
-        bg_color = '#FFFFFF' # Branco
+    if "2 Vagas" in status: bg_color = '#FFEBEE'
+    elif "1 Vaga" in status: bg_color = '#FFF9C4'
+    else: bg_color = '#FFFFFF'
     return [f'background-color: {bg_color}; color: black'] * len(row)
 
-# --- 3. COMPONENTE DE CONFIRMAÇÃO ---
+# --- 3. DIALOG ---
 @st.dialog("Confirmar")
 def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev):
+    # Aqui a data aparece como DD/MM no resumo
+    data_formatada = row['Data_Dt'].strftime('%d/%m')
     st.write(f"**{row[col_ev]}**")
-    st.write(f"{row['Data_Formatada'].strftime('%d/%m')} ({row['Dia_da_Semana']})")
+    st.write(f"{data_formatada} ({row['Dia_da_Semana']})")
     st.write(f"Vaga: {vaga_n}")
     if st.button("Confirmar", type="primary", use_container_width=True):
         with st.spinner("Salvando..."):
@@ -70,7 +68,7 @@ def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev):
             st.cache_resource.clear()
             st.rerun()
 
-# --- 4. INTERFACE E LOGIN ---
+# --- 4. LOGIN ---
 st.set_page_config(page_title="ProVida", layout="wide")
 st.markdown("<style>.stApp {background-color: white; color: black;} h1,h2,h3,p,label,div {color: black !important;}</style>", unsafe_allow_html=True)
 
@@ -87,14 +85,12 @@ if not st.session_state.autenticado:
                 st.rerun()
     st.stop()
 
-# --- 5. PROCESSAMENTO DE DADOS ---
+# --- 5. DATA ---
 try:
     sheet, df = load_data()
     col_ev = next((c for c in df.columns if 'Evento' in c), 'Evento')
     
-    # Datas e Status
     df['Data_Dt'] = pd.to_datetime(df['Data Específica'], errors='coerce')
-    df['Data_Formatada'] = df['Data_Dt'].dt.date
     df['Dia_da_Semana'] = df['Data_Dt'].dt.weekday.map(dias_semana)
     df['Niv_N'] = df['Nível'].astype(str).str.strip().map(mapa_niveis).fillna(99)
     df['Status'] = df.apply(definir_status, axis=1)
@@ -108,17 +104,17 @@ try:
             st.session_state.autenticado = False
             st.rerun()
 
-    # Filtro de permissão e data
-    df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Formatada'] >= f_dat)].copy()
-    if so_vagas: 
-        df_f = df_f[df_f['Status'] != "🟢 Completo"]
+    # Filtro
+    df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Dt'].dt.date >= f_dat)].copy()
+    if so_vagas: df_f = df_f[df_f['Status'] != "🟢 Completo"]
 
-    # --- 6. INSCRIÇÃO POR LISTA (MOBILE FRIENDLY) ---
+    # --- 6. INSCRIÇÃO RÁPIDA ---
     st.subheader("📝 Inscrição Rápida")
     v_l = df_f[df_f['Status'] != "🟢 Completo"].copy()
     if not v_l.empty:
-        v_l['label'] = v_l.apply(lambda x: f"{x['Data_Formatada'].strftime('%d/%m')} | {x[col_ev][:12]}.. | {x['Status']}", axis=1)
-        esc = st.selectbox("Escolha a atividade:", v_l['label'].tolist(), index=None, placeholder="Selecione...")
+        # Data formatada para DD/MM no dropdown
+        v_l['label'] = v_l.apply(lambda x: f"{x['Data_Dt'].strftime('%d/%m')} | {x[col_ev][:12]}.. | {x['Status']}", axis=1)
+        esc = st.selectbox("Escolha:", v_l['label'].tolist(), index=None, placeholder="Selecione...")
         if esc:
             idx = v_l[v_l['label'] == esc].index[0]
             if st.button("Inscrever-se", type="primary"):
@@ -126,17 +122,17 @@ try:
                 v1_val = str(sheet.cell(lin, 7).value).strip()
                 confirmar_dialog(sheet, lin, v_l.loc[idx], ("V1" if v1_val == "" else "V2"), (7 if v1_val == "" else 8), col_ev)
     
-    # --- 7. ESCALA (TABELA COLORIDA) ---
+    # --- 7. ESCALA (TABELA) ---
     st.divider()
     st.subheader("📋 Escala")
-    st.caption("Toque na linha para se inscrever")
-
-    # Preparando DataFrame para exibição mobile
+    
     df_show = df_f.copy()
-    df_show = df_show.rename(columns={col_ev: 'Evento', 'Data_Formatada': 'Data', 'Dia_da_Semana': 'Dia', 'Voluntário 1': 'V1', 'Voluntário 2': 'V2'})
+    # Criando a coluna de exibição DD/MM
+    df_show['Data'] = df_show['Data_Dt'].dt.strftime('%d/%m')
+    
+    df_show = df_show.rename(columns={col_ev: 'Evento', 'Dia_da_Semana': 'Dia', 'Voluntário 1': 'V1', 'Voluntário 2': 'V2'})
     cols_display = ['Status', 'Evento', 'Data', 'Dia', 'V1', 'V2']
 
-    # Aplicação do Estilo e Exibição
     sel = st.dataframe(
         df_show[cols_display].style.apply(aplicar_estilo_linha, axis=1), 
         use_container_width=True, 
@@ -145,16 +141,13 @@ try:
         selection_mode="single-row"
     )
 
-    # Detecção de Clique na Tabela
     if sel.selection.rows:
         r_idx = sel.selection.rows[0]
-        r_sel = df_f.iloc[r_idx] # Usa o DF original para pegar dados reais
+        r_sel = df_f.iloc[r_idx]
         if "Completo" not in r_sel['Status']:
             lin_orig = int(r_sel.name) + 2
             v1_a = str(r_sel['Voluntário 1']).strip()
             confirmar_dialog(sheet, lin_orig, r_sel, ("V1" if v1_a == "" else "V2"), (7 if v1_a == "" else 8), col_ev)
-        else:
-            st.warning("Escala já preenchida.")
 
 except Exception as e:
-    st.error("Erro ao carregar os dados. Verifique a planilha.")
+    st.error("Erro ao carregar dados.")
