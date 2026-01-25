@@ -36,21 +36,10 @@ def load_data():
     df.columns = [col.strip() for col in df.columns]
     return sheet, df
 
-# --- 2. NOVO MAPA DE NÍVEIS ---
+# --- 2. MAPA DE NÍVEIS ---
 mapa_niveis = {
-    "Nenhum": 0, 
-    "BAS": 1, 
-    "AV1": 2, 
-    "IN": 3, 
-    "AV2": 4, 
-    "AV2-24": 4, 
-    "AV2-23": 5, 
-    "Av.2/": 6, 
-    "AV3": 7, 
-    "AV3A": 8, 
-    "AV3/": 9, 
-    "AV4": 10, 
-    "AV4A": 11
+    "Nenhum": 0, "BAS": 1, "AV1": 2, "IN": 3, "AV2": 4, "AV2-24": 4, 
+    "AV2-23": 5, "Av.2/": 6, "AV3": 7, "AV3A": 8, "AV3/": 9, "AV4": 10, "AV4A": 11
 }
 
 dias_semana = {0: "Seg", 1: "Ter", 2: "Qua", 3: "Qui", 4: "Sex", 5: "Sáb", 6: "Dom"}
@@ -72,10 +61,11 @@ def aplicar_estilo_linha(row):
 # --- 3. DIALOG ---
 @st.dialog("Confirmar")
 def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev):
-    data_formatada = row['Data_Dt'].strftime('%d/%m')
+    data_f = row['Data_Dt'].strftime('%d/%m')
     st.write(f"**{row[col_ev]}**")
-    st.write(f"{data_formatada} ({row['Dia_da_Semana']})")
-    st.write(f"Vaga: {vaga_n}")
+    st.write(f"📅 {data_f} ({row['Dia_da_Semana']}) - ⏰ {row['Horário']}")
+    st.write(f"🎓 Nível: {row['Nível']}")
+    st.write(f"👤 Vaga: {vaga_n}")
     if st.button("Confirmar", type="primary", use_container_width=True):
         with st.spinner("Salvando..."):
             sheet.update_cell(linha, col_idx, st.session_state.nome_usuario)
@@ -99,18 +89,18 @@ if not st.session_state.autenticado:
                 st.rerun()
     st.stop()
 
-# --- 5. DATA E ORDENAÇÃO ---
+# --- 5. DATA E PROCESSAMENTO ---
 try:
     sheet, df = load_data()
     col_ev = next((c for c in df.columns if 'Evento' in c), 'Evento')
+    col_hr = 'Horário' if 'Horário' in df.columns else (next((c for c in df.columns if 'Hora' in c), 'Horário'))
     
     df['Data_Dt'] = pd.to_datetime(df['Data Específica'], errors='coerce')
     df['Dia_da_Semana'] = df['Data_Dt'].dt.weekday.map(dias_semana)
-    # Ajuste: remove espaços extras dos níveis vindo da planilha antes de comparar
     df['Niv_N'] = df['Nível'].astype(str).str.strip().map(mapa_niveis).fillna(99)
     df['Status'] = df.apply(definir_status, axis=1)
 
-    # Ordenação Cronológica preservando o índice da planilha
+    # Ordenação Cronológica
     df = df.sort_values(by='Data_Dt').reset_index(drop=False)
 
     st.title(f"🤝 Olá, {st.session_state.nome_usuario.split()[0]}")
@@ -122,7 +112,6 @@ try:
             st.session_state.autenticado = False
             st.rerun()
 
-    # Filtro de permissão (nível do usuário >= nível da atividade) e data
     df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Dt'].dt.date >= f_dat)].copy()
     if so_vagas: df_f = df_f[df_f['Status'] != "🟢 Completo"]
 
@@ -130,23 +119,33 @@ try:
     st.subheader("📝 Inscrição Rápida")
     v_l = df_f[df_f['Status'] != "🟢 Completo"].copy()
     if not v_l.empty:
-        v_l['label'] = v_l.apply(lambda x: f"{x['Data_Dt'].strftime('%d/%m')} | {x[col_ev][:12]}.. | {x['Status']}", axis=1)
+        v_l['label'] = v_l.apply(lambda x: f"{x['Data_Dt'].strftime('%d/%m')} | {x[col_hr]} | {x[col_ev][:10]}.. | {x['Status']}", axis=1)
         esc = st.selectbox("Escolha:", v_l['label'].tolist(), index=None, placeholder="Selecione...")
         if esc:
             idx_vagas = v_l[v_l['label'] == esc].index[0]
             if st.button("Inscrever-se", type="primary"):
-                linha_planilha = int(v_l.loc[idx_vagas, 'index']) + 2
-                val_v1 = str(sheet.cell(linha_planilha, 7).value).strip()
-                confirmar_dialog(sheet, linha_planilha, v_l.loc[idx_vagas], ("V1" if val_v1 == "" else "V2"), (7 if val_v1 == "" else 8), col_ev)
+                linha_p = int(v_l.loc[idx_vagas, 'index']) + 2
+                val_v1 = str(sheet.cell(linha_p, 7).value).strip()
+                confirmar_dialog(sheet, linha_p, v_l.loc[idx_vagas], ("V1" if val_v1 == "" else "V2"), (7 if val_v1 == "" else 8), col_ev)
     
-    # --- 7. ESCALA (TABELA) ---
+    # --- 7. ESCALA (TABELA COM NÍVEL E HORÁRIO) ---
     st.divider()
     st.subheader("📋 Escala")
     
     df_show = df_f.copy()
     df_show['Data'] = df_show['Data_Dt'].dt.strftime('%d/%m')
-    df_show = df_show.rename(columns={col_ev: 'Evento', 'Dia_da_Semana': 'Dia', 'Voluntário 1': 'V1', 'Voluntário 2': 'V2'})
-    cols_display = ['Status', 'Evento', 'Data', 'Dia', 'V1', 'V2']
+    # Renomeando para ficar curto no mobile
+    df_show = df_show.rename(columns={
+        col_ev: 'Evento', 
+        col_hr: 'Hora',
+        'Nível': 'Nív.',
+        'Dia_da_Semana': 'Dia', 
+        'Voluntário 1': 'V1', 
+        'Voluntário 2': 'V2'
+    })
+    
+    # Nova ordem de colunas incluindo Nível e Hora
+    cols_display = ['Status', 'Data', 'Dia', 'Hora', 'Nív.', 'Evento', 'V1', 'V2']
 
     sel = st.dataframe(
         df_show[cols_display].style.apply(aplicar_estilo_linha, axis=1), 
@@ -167,4 +166,4 @@ try:
             st.warning("Escala já preenchida.")
 
 except Exception as e:
-    st.error(f"Erro ao carregar dados: {e}")
+    st.error(f"Erro: {e}")
