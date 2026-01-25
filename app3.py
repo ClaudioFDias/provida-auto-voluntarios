@@ -62,11 +62,10 @@ def aplicar_estilo_linha(row):
 @st.dialog("Confirmar")
 def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev):
     data_f = row['Data_Dt'].strftime('%d/%m')
-    st.write(f"**{row[col_ev]}**")
-    st.write(f"📅 {data_f} ({row['Dia_da_Semana']}) - ⏰ {row['Horário']}")
-    st.write(f"🎓 Nível: {row['Nível']}")
-    st.write(f"👤 Vaga: {vaga_n}")
-    if st.button("Confirmar", type="primary", use_container_width=True):
+    st.markdown(f"### {row[col_ev]}")
+    st.markdown(f"**📌 Info:** {row['Nível']} - {data_f} ({row['Dia_da_Semana']}) - {row['Horário']}")
+    st.markdown(f"**👤 Vaga:** {vaga_n}")
+    if st.button("✅ Confirmar Inscrição", type="primary", use_container_width=True):
         with st.spinner("Salvando..."):
             sheet.update_cell(linha, col_idx, st.session_state.nome_usuario)
             st.cache_resource.clear()
@@ -100,7 +99,7 @@ try:
     df['Niv_N'] = df['Nível'].astype(str).str.strip().map(mapa_niveis).fillna(99)
     df['Status'] = df.apply(definir_status, axis=1)
 
-    # Ordenação Cronológica (Data e depois Horário)
+    # Ordenação Cronológica (Data e Horário)
     df = df.sort_values(by=['Data_Dt', col_hr]).reset_index(drop=False)
 
     st.title(f"🤝 Olá, {st.session_state.nome_usuario.split()[0]}")
@@ -119,36 +118,35 @@ try:
     st.subheader("📝 Inscrição Rápida")
     v_l = df_f[df_f['Status'] != "🟢 Completo"].copy()
     if not v_l.empty:
-        v_l['label'] = v_l.apply(lambda x: f"{x['Data_Dt'].strftime('%d/%m')} - {x['Dia_da_Semana']} - {x[col_hr]} | {x[col_ev][:10]}..", axis=1)
-        esc = st.selectbox("Escolha:", v_l['label'].tolist(), index=None, placeholder="Selecione...")
+        v_l['label'] = v_l.apply(lambda x: f"{x['Nível']} | {x['Data_Dt'].strftime('%d/%m')} - {x[col_hr]} | {x[col_ev][:10]}..", axis=1)
+        esc = st.selectbox("Escolha a atividade:", v_l['label'].tolist(), index=None, placeholder="Selecione...")
         if esc:
             idx_vagas = v_l[v_l['label'] == esc].index[0]
             if st.button("Inscrever-se", type="primary"):
                 linha_p = int(v_l.loc[idx_vagas, 'index']) + 2
                 val_v1 = str(sheet.cell(linha_p, 7).value).strip()
-                confirmar_dialog(sheet, linha_p, v_l.loc[idx_vagas], ("V1" if val_v1 == "" else "V2"), (7 if v1_val == "" else 8), col_ev)
+                confirmar_dialog(sheet, linha_p, v_l.loc[idx_vagas], ("V1" if val_v1 == "" else "V2"), (7 if val_v1 == "" else 8), col_ev)
     
-    # --- 7. ESCALA (TABELA COM COLUNA COMBINADA) ---
+    # --- 7. ESCALA (TABELA SUPER OTIMIZADA) ---
     st.divider()
     st.subheader("📋 Escala")
     
     df_show = df_f.copy()
     
-    # CRIANDO A COLUNA COMBINADA: DD/MM - Dia - Hora
-    df_show['Data/Hora'] = df_show.apply(
-        lambda x: f"{x['Data_Dt'].strftime('%d/%m')} - {x['Dia_da_Semana']} - {x[col_hr]}", axis=1
+    # JUNTANDO: Nível - Data - Hora em uma única coluna
+    df_show['Info (Nív-Data-Hora)'] = df_show.apply(
+        lambda x: f"{x['Nível']} - {x['Data_Dt'].strftime('%d/%m')} ({x['Dia_da_Semana']}) - {x[col_hr]}", axis=1
     )
     
     # Renomeando colunas restantes
     df_show = df_show.rename(columns={
         col_ev: 'Evento', 
-        'Nível': 'Nív.',
         'Voluntário 1': 'V1', 
         'Voluntário 2': 'V2'
     })
     
-    # Seleção de colunas otimizada para Mobile
-    cols_display = ['Status', 'Data/Hora', 'Nív.', 'Evento', 'V1', 'V2']
+    # Nova ordem solicitada: Status | Info | Evento | V1 | V2
+    cols_display = ['Status', 'Info (Nív-Data-Hora)', 'Evento', 'V1', 'V2']
 
     sel = st.dataframe(
         df_show[cols_display].style.apply(aplicar_estilo_linha, axis=1), 
