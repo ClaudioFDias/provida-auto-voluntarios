@@ -90,20 +90,22 @@ if not st.session_state.autenticado:
 # --- 5. DATA E PROCESSAMENTO ---
 try:
     sheet, df = load_data()
-    col_ev = next((c for c in df.columns if 'Evento' in c), 'Evento')
-    # Tenta achar a coluna de Horário, se não existir, cria uma vazia para não dar erro
-    col_hr = next((c for c in df.columns if 'Horário' in c or 'Hora' in c), None)
-    if not col_hr:
-        df['Horário'] = "---"
-        col_hr = 'Horário'
     
-    # dayfirst=True resolve o UserWarning de datas brasileiras
+    # Identifica colunas dinamicamente (com ou sem acento)
+    col_ev = next((c for c in df.columns if 'Evento' in c), 'Evento')
+    col_hr = next((c for c in df.columns if c.lower() in ['horário', 'horario', 'hora']), None)
+    
+    if not col_hr:
+        df['Horario'] = "---"
+        col_hr = 'Horario'
+    
+    # Processamento de Datas
     df['Data_Dt'] = pd.to_datetime(df['Data Específica'], errors='coerce', dayfirst=True)
     df['Dia_da_Semana'] = df['Data_Dt'].dt.weekday.map(dias_semana)
     df['Niv_N'] = df['Nível'].astype(str).str.strip().map(mapa_niveis).fillna(99)
     df['Status'] = df.apply(definir_status, axis=1)
 
-    # Ordenação Cronológica
+    # Ordenação
     df = df.sort_values(by=['Data_Dt', col_hr]).reset_index(drop=False)
 
     st.title(f"🤝 Olá, {st.session_state.nome_usuario.split()[0]}")
@@ -115,7 +117,7 @@ try:
             st.session_state.autenticado = False
             st.rerun()
 
-    # Define df_f ANTES de usá-lo na tabela para evitar NameError
+    # FILTRAGEM (Garante que df_f existe para as seções seguintes)
     df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Dt'].dt.date >= f_dat)].copy()
     if so_vagas: 
         df_f = df_f[df_f['Status'] != "🟢 Completo"]
@@ -130,6 +132,7 @@ try:
             idx_vagas = v_l[v_l['label'] == esc].index[0]
             if st.button("Inscrever-se", type="primary", width="stretch"):
                 linha_p = int(v_l.loc[idx_vagas, 'index']) + 2
+                # Aqui usamos colunas 7 e 8 fixas conforme sua estrutura de Voluntários
                 val_v1 = str(sheet.cell(linha_p, 7).value).strip()
                 confirmar_dialog(sheet, linha_p, v_l.loc[idx_vagas], ("V1" if val_v1 == "" else "V2"), (7 if val_v1 == "" else 8), col_ev, col_hr)
     
@@ -162,4 +165,4 @@ try:
             confirmar_dialog(sheet, linha_orig, r_sel, ("V1" if v1_a == "" else "V2"), (7 if v1_a == "" else 8), col_ev, col_hr)
 
 except Exception as e:
-    st.error(f"Erro: {e}")
+    st.error(f"Erro no processamento: {e}")
