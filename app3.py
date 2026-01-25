@@ -36,8 +36,23 @@ def load_data():
     df.columns = [col.strip() for col in df.columns]
     return sheet, df
 
-# --- 2. CONFIGS E ESTILO ---
-mapa_niveis = {"Nenhum": 0, "Básico": 1, "Av.1": 2, "Introdução": 3, "Av.2": 4, "Av.2|": 5, "Av.3": 6, "Av.3|": 7, "Av.4": 8}
+# --- 2. NOVO MAPA DE NÍVEIS ---
+mapa_niveis = {
+    "Nenhum": 0, 
+    "BAS": 1, 
+    "AV1": 2, 
+    "IN": 3, 
+    "AV2": 4, 
+    "AV2-24": 4, 
+    "AV2-23": 5, 
+    "Av.2/": 6, 
+    "AV3": 7, 
+    "AV3A": 8, 
+    "AV3/": 9, 
+    "AV4": 10, 
+    "AV4A": 11
+}
+
 dias_semana = {0: "Seg", 1: "Ter", 2: "Qua", 3: "Qui", 4: "Sex", 5: "Sáb", 6: "Dom"}
 
 def definir_status(row):
@@ -84,19 +99,19 @@ if not st.session_state.autenticado:
                 st.rerun()
     st.stop()
 
-# --- 5. DATA ---
+# --- 5. DATA E ORDENAÇÃO ---
 try:
     sheet, df = load_data()
     col_ev = next((c for c in df.columns if 'Evento' in c), 'Evento')
     
-    # Datas e Processamento
     df['Data_Dt'] = pd.to_datetime(df['Data Específica'], errors='coerce')
     df['Dia_da_Semana'] = df['Data_Dt'].dt.weekday.map(dias_semana)
+    # Ajuste: remove espaços extras dos níveis vindo da planilha antes de comparar
     df['Niv_N'] = df['Nível'].astype(str).str.strip().map(mapa_niveis).fillna(99)
     df['Status'] = df.apply(definir_status, axis=1)
 
-    # --- ORDENAÇÃO POR DATA (CRONOLÓGICA) ---
-    df = df.sort_values(by='Data_Dt').reset_index(drop=False) # Mantemos o index original para referência na planilha
+    # Ordenação Cronológica preservando o índice da planilha
+    df = df.sort_values(by='Data_Dt').reset_index(drop=False)
 
     st.title(f"🤝 Olá, {st.session_state.nome_usuario.split()[0]}")
 
@@ -107,7 +122,7 @@ try:
             st.session_state.autenticado = False
             st.rerun()
 
-    # Filtro de permissão e data selecionada
+    # Filtro de permissão (nível do usuário >= nível da atividade) e data
     df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Dt'].dt.date >= f_dat)].copy()
     if so_vagas: df_f = df_f[df_f['Status'] != "🟢 Completo"]
 
@@ -120,7 +135,6 @@ try:
         if esc:
             idx_vagas = v_l[v_l['label'] == esc].index[0]
             if st.button("Inscrever-se", type="primary"):
-                # Pegamos o index original que foi preservado na coluna 'index'
                 linha_planilha = int(v_l.loc[idx_vagas, 'index']) + 2
                 val_v1 = str(sheet.cell(linha_planilha, 7).value).strip()
                 confirmar_dialog(sheet, linha_planilha, v_l.loc[idx_vagas], ("V1" if val_v1 == "" else "V2"), (7 if val_v1 == "" else 8), col_ev)
@@ -146,7 +160,6 @@ try:
         r_idx = sel.selection.rows[0]
         r_sel = df_f.iloc[r_idx]
         if "Completo" not in r_sel['Status']:
-            # Pegamos o index original preservado
             linha_orig = int(r_sel['index']) + 2
             v1_a = str(r_sel['Voluntário 1']).strip()
             confirmar_dialog(sheet, linha_orig, r_sel, ("V1" if v1_a == "" else "V2"), (7 if v1_a == "" else 8), col_ev)
