@@ -1,67 +1,168 @@
 import streamlit as st
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import re
+import pandas as pd
+from datetime import datetime
 import textwrap
+import re
 
-st.set_page_config(page_title="Validador de Nova Chave", layout="wide")
-st.title("🚀 Teste de Fogo: Nova Credencial")
-
-def realizar_teste():
+# --- 1. CONEXÃO ---
+@st.cache_resource
+def get_gspread_client():
     try:
-        # 1. Reconstrução das 21 partes (S1 a S21)
-        st.subheader("1. Reconstruindo Chave do Secrets...")
         partes = [f"S{i}" for i in range(1, 22)]
-        chave_full = ""
-        
-        for p in partes:
-            if p in st.secrets:
-                chave_full += re.sub(r'[^A-Za-z0-9+/=]', '', st.secrets[p])
-            else:
-                st.error(f"Faltando a parte {p} no Secrets!")
-                return
-
-        st.write(f"✅ Total de caracteres: {len(chave_full)}")
-        
-        # 2. Montagem do Objeto de Credenciais
-        st.subheader("2. Validando Assinatura com o Google...")
-        
+        chave_full = "".join([re.sub(r'[^A-Za-z0-9+/=]', '', st.secrets[p]) for p in partes])
         key_lines = textwrap.wrap(chave_full, 64)
         formatted_key = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(key_lines) + "\n-----END PRIVATE KEY-----\n"
-
         creds_info = {
-            "type": "service_account",
-            "project_id": "chromatic-tree-279819",
-            "private_key_id": st.secrets.get("PRIVATE_KEY_ID", "NÃO ENCONTRADO"),
-            "private_key": formatted_key,
-            "client_email": "volutarios@chromatic-tree-279819.iam.gserviceaccount.com",
-            "client_id": "110888986067806154751",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/volutarios%40chromatic-tree-279819.iam.gserviceaccount.com"
+            "type": st.secrets["TYPE"], "project_id": st.secrets["PROJECT_ID"],
+            "private_key_id": st.secrets["PRIVATE_KEY_ID"], "private_key": formatted_key,
+            "client_email": st.secrets["CLIENT_EMAIL"], "client_id": st.secrets["CLIENT_ID"],
+            "auth_uri": st.secrets["AUTH_URI"], "token_uri": st.secrets["TOKEN_URI"],
+            "auth_provider_x509_cert_url": st.secrets["AUTH_PROVIDER_X509_CERT_URL"],
+            "client_x509_cert_url": st.secrets["CLIENT_X509_CERT_URL"]
         }
-
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
-        client = gspread.authorize(creds)
-        st.success("✅ Assinatura JWT aceita pelo Google!")
+        return gspread.authorize(creds)
+    except Exception:
+        st.error("Erro de conexão."); st.stop()
 
-        # 3. Teste de Acesso à Planilha
-        st.subheader("3. Verificando Acesso à Planilha...")
-        planilha_id = "1paP1ZB2ufwCc95T_gdCR92kx-suXbROnDfbWMC_ka0c"
-        sh = client.open_by_key(planilha_id)
-        
-        st.balloons()
-        st.success(f"🔥 SUCESSO TOTAL! Planilha '{sh.title}' acessada.")
-        
-        # Mostrar uma prévia dos dados para confirmar
-        dados = sh.worksheet("Calendario_Eventos").get_all_records()
-        st.write(f"Encontradas {len(dados)} linhas na planilha.")
+def load_data():
+    client = get_gspread_client()
+    ss = client.open_by_key("1paP1ZB2ufwCc95T_gdCR92kx-suXbROnDfbWMC_ka0c")
+    sheet = ss.worksheet("Calendario_Eventos")
+    df = pd.DataFrame(sheet.get_all_records())
+    df.columns = [col.strip() for col in df.columns]
+    return sheet, df
 
-    except Exception as e:
-        st.error(f"❌ Falha no Teste: {e}")
-        st.info("Dica: Se aparecer 'Permission Denied', verifique se o e-mail 'volutarios@...' está como Editor na sua Planilha Google.")
+# --- 2. MAPA DE NÍVEIS ---
+mapa_niveis = {
+    "Nenhum": 0, "BAS": 1, "AV1": 2, "IN": 3, "AV2": 4, "AV2-24": 4, 
+    "AV2-23": 5, "Av.2/": 6, "AV3": 7, "AV3A": 8, "AV3/": 9, "AV4": 10, "AV4A": 11
+}
+dias_semana = {0: "Seg", 1: "Ter", 2: "Qua", 3: "Qui", 4: "Sex", 5: "Sáb", 6: "Dom"}
 
-if st.button("Iniciar Validação Real"):
-    realizar_teste()
+def definir_status(row):
+    v1 = str(row.get('Voluntário 1', '')).strip()
+    v2 = str(row.get('Voluntário 2', '')).strip()
+    if v1 == "" and v2 == "": return "🔴 2 Vagas"
+    if v1 == "" or v2 == "": return "🟡 1 Vaga"
+    return "🟢 Completo"
+
+def aplicar_estilo_linha(row):
+    status = str(row.get('Status', ''))
+    if "2 Vagas" in status: bg_color = '#FFEBEE'
+    elif "1 Vaga" in status: bg_color = '#FFF9C4'
+    else: bg_color = '#FFFFFF'
+    return [f'background-color: {bg_color}; color: black'] * len(row)
+
+# --- 3. DIALOG ---
+@st.dialog("Confirmar")
+def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev, col_hr):
+    data_f = row['Data_Dt'].strftime('%d/%m')
+    st.markdown(f"### {row[col_ev]}")
+    st.markdown(f"**📌 Info:** {row['Nível']} - {data_f} ({row['Dia_da_Semana']}) - {row[col_hr]}")
+    st.markdown(f"**👤 Vaga:** {vaga_n}")
+    if st.button("✅ Confirmar Inscrição", type="primary", width="stretch"):
+        with st.spinner("Salvando..."):
+            sheet.update_cell(linha, col_idx, st.session_state.nome_usuario)
+            st.cache_resource.clear()
+            st.rerun()
+
+# --- 4. LOGIN ---
+st.set_page_config(page_title="ProVida", layout="wide")
+st.markdown("<style>.stApp {background-color: white; color: black;} h1,h2,h3,p,label,div {color: black !important;}</style>", unsafe_allow_html=True)
+
+if 'autenticado' not in st.session_state: st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    st.title("🔐 Login")
+    with st.form("login"):
+        n = st.text_input("Nome Completo")
+        niv = st.selectbox("Seu Nível", list(mapa_niveis.keys()))
+        if st.form_submit_button("Entrar"):
+            if n: 
+                st.session_state.update({"nome_usuario": n, "nivel_num": mapa_niveis[niv], "autenticado": True})
+                st.rerun()
+    st.stop()
+
+# --- 5. DATA E PROCESSAMENTO ---
+try:
+    sheet, df = load_data()
+    
+    # Identifica colunas dinamicamente (com ou sem acento)
+    col_ev = next((c for c in df.columns if 'Evento' in c), 'Evento')
+    col_hr = next((c for c in df.columns if c.lower() in ['horário', 'horario', 'hora']), None)
+    
+    if not col_hr:
+        df['Horario'] = "---"
+        col_hr = 'Horario'
+    
+    # Processamento de Datas
+    df['Data_Dt'] = pd.to_datetime(df['Data Específica'], errors='coerce', dayfirst=True)
+    df['Dia_da_Semana'] = df['Data_Dt'].dt.weekday.map(dias_semana)
+    df['Niv_N'] = df['Nível'].astype(str).str.strip().map(mapa_niveis).fillna(99)
+    df['Status'] = df.apply(definir_status, axis=1)
+
+    # Ordenação
+    df = df.sort_values(by=['Data_Dt', col_hr]).reset_index(drop=False)
+
+    st.title(f"🤝 Olá, {st.session_state.nome_usuario.split()[0]}")
+
+    with st.sidebar:
+        f_dat = st.date_input("Filtrar Data", datetime.now().date())
+        so_vagas = st.checkbox("Ver apenas vagas", value=False)
+        if st.button("Sair"): 
+            st.session_state.autenticado = False
+            st.rerun()
+
+    # FILTRAGEM (Garante que df_f existe para as seções seguintes)
+    df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Dt'].dt.date >= f_dat)].copy()
+    if so_vagas: 
+        df_f = df_f[df_f['Status'] != "🟢 Completo"]
+
+    # --- 6. INSCRIÇÃO RÁPIDA ---
+    st.subheader("📝 Inscrição Rápida")
+    v_l = df_f[df_f['Status'] != "🟢 Completo"].copy()
+    if not v_l.empty:
+        v_l['label'] = v_l.apply(lambda x: f"{x['Nível']} | {x['Data_Dt'].strftime('%d/%m')} - {x[col_hr]} | {x[col_ev][:10]}..", axis=1)
+        esc = st.selectbox("Escolha a atividade:", v_l['label'].tolist(), index=None, placeholder="Selecione...")
+        if esc:
+            idx_vagas = v_l[v_l['label'] == esc].index[0]
+            if st.button("Inscrever-se", type="primary", width="stretch"):
+                linha_p = int(v_l.loc[idx_vagas, 'index']) + 2
+                # Aqui usamos colunas 7 e 8 fixas conforme sua estrutura de Voluntários
+                val_v1 = str(sheet.cell(linha_p, 7).value).strip()
+                confirmar_dialog(sheet, linha_p, v_l.loc[idx_vagas], ("V1" if val_v1 == "" else "V2"), (7 if val_v1 == "" else 8), col_ev, col_hr)
+    
+    # --- 7. ESCALA (TABELA) ---
+    st.divider()
+    st.subheader("📋 Escala")
+    
+    df_show = df_f.copy()
+    df_show['Info (Nív-Data-Hora)'] = df_show.apply(
+        lambda x: f"{x['Nível']} - {x['Data_Dt'].strftime('%d/%m')} ({x['Dia_da_Semana']}) - {x[col_hr]}", axis=1
+    )
+    df_show = df_show.rename(columns={col_ev: 'Evento', 'Voluntário 1': 'V1', 'Voluntário 2': 'V2'})
+    
+    cols_display = ['Status', 'Info (Nív-Data-Hora)', 'Evento', 'V1', 'V2']
+
+    sel = st.dataframe(
+        df_show[cols_display].style.apply(aplicar_estilo_linha, axis=1), 
+        width="stretch", 
+        hide_index=True, 
+        on_select="rerun", 
+        selection_mode="single-row"
+    )
+
+    if sel.selection.rows:
+        r_idx = sel.selection.rows[0]
+        r_sel = df_f.iloc[r_idx]
+        if "Completo" not in r_sel['Status']:
+            linha_orig = int(r_sel['index']) + 2
+            v1_a = str(r_sel['Voluntário 1']).strip()
+            confirmar_dialog(sheet, linha_orig, r_sel, ("V1" if v1_a == "" else "V2"), (7 if v1_a == "" else 8), col_ev, col_hr)
+
+except Exception as e:
+    st.error(f"Erro no processamento: {e}")
