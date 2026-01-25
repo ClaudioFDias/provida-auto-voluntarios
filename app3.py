@@ -6,7 +6,7 @@ from datetime import datetime
 import textwrap
 import re
 
-# --- 1. CONEXÃO (Igual ao anterior) ---
+# --- 1. CONEXÃO ---
 @st.cache_resource
 def get_gspread_client():
     try:
@@ -36,7 +36,7 @@ def load_data():
     df.columns = [col.strip() for col in df.columns]
     return sheet, df
 
-# --- 2. CONFIGS ---
+# --- 2. MAPA DE NÍVEIS ---
 mapa_niveis = {
     "Nenhum": 0, "BAS": 1, "AV1": 2, "IN": 3, "AV2": 4, "AV2-24": 4, 
     "AV2-23": 5, "Av.2/": 6, "AV3": 7, "AV3A": 8, "AV3/": 9, "AV4": 10, "AV4A": 11
@@ -44,23 +44,35 @@ mapa_niveis = {
 dias_semana = {0: "Seg", 1: "Ter", 2: "Qua", 3: "Qui", 4: "Sex", 5: "Sáb", 6: "Dom"}
 
 def definir_status(row):
-    v1, v2 = str(row.get('Voluntário 1', '')).strip(), str(row.get('Voluntário 2', '')).strip()
-    if v1 == "" and v2 == "": return "🔴 2 Vagas", "#FFEBEE"
-    if v1 == "" or v2 == "": return "🟡 1 Vaga", "#FFF9C4"
-    return "🟢 Completo", "#FFFFFF"
+    v1 = str(row.get('Voluntário 1', '')).strip()
+    v2 = str(row.get('Voluntário 2', '')).strip()
+    if v1 == "" and v2 == "": return "🔴 2 Vagas"
+    if v1 == "" or v2 == "": return "🟡 1 Vaga"
+    return "🟢 Completo"
+
+def aplicar_estilo_linha(row):
+    status = str(row.get('Status', ''))
+    if "2 Vagas" in status: bg_color = '#FFEBEE'
+    elif "1 Vaga" in status: bg_color = '#FFF9C4'
+    else: bg_color = '#FFFFFF'
+    return [f'background-color: {bg_color}; color: black'] * len(row)
 
 # --- 3. DIALOG ---
-@st.dialog("Confirmar Inscrição")
-def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev):
+@st.dialog("Confirmar")
+def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev, col_hr):
+    data_f = row['Data_Dt'].strftime('%d/%m')
     st.markdown(f"### {row[col_ev]}")
-    st.write(f"⏰ {row['Data_Dt'].strftime('%d/%m')} - {row['Horário']}")
-    if st.button("Confirmar", type="primary", use_container_width=True):
-        sheet.update_cell(linha, col_idx, st.session_state.nome_usuario)
-        st.cache_resource.clear()
-        st.rerun()
+    st.markdown(f"**📌 Info:** {row['Nível']} - {data_f} ({row['Dia_da_Semana']}) - {row[col_hr]}")
+    st.markdown(f"**👤 Vaga:** {vaga_n}")
+    if st.button("✅ Confirmar Inscrição", type="primary", width="stretch"):
+        with st.spinner("Salvando..."):
+            sheet.update_cell(linha, col_idx, st.session_state.nome_usuario)
+            st.cache_resource.clear()
+            st.rerun()
 
 # --- 4. LOGIN ---
 st.set_page_config(page_title="ProVida", layout="wide")
+st.markdown("<style>.stApp {background-color: white; color: black;} h1,h2,h3,p,label,div {color: black !important;}</style>", unsafe_allow_html=True)
 
 if 'autenticado' not in st.session_state: st.session_state.autenticado = False
 
@@ -75,59 +87,79 @@ if not st.session_state.autenticado:
                 st.rerun()
     st.stop()
 
-# --- 5. DATA ---
+# --- 5. DATA E PROCESSAMENTO ---
 try:
     sheet, df = load_data()
     col_ev = next((c for c in df.columns if 'Evento' in c), 'Evento')
-    col_hr = 'Horário' if 'Horário' in df.columns else 'Horário'
+    # Tenta achar a coluna de Horário, se não existir, cria uma vazia para não dar erro
+    col_hr = next((c for c in df.columns if 'Horário' in c or 'Hora' in c), None)
+    if not col_hr:
+        df['Horário'] = "---"
+        col_hr = 'Horário'
     
-    df['Data_Dt'] = pd.to_datetime(df['Data Específica'], errors='coerce')
+    # dayfirst=True resolve o UserWarning de datas brasileiras
+    df['Data_Dt'] = pd.to_datetime(df['Data Específica'], errors='coerce', dayfirst=True)
     df['Dia_da_Semana'] = df['Data_Dt'].dt.weekday.map(dias_semana)
     df['Niv_N'] = df['Nível'].astype(str).str.strip().map(mapa_niveis).fillna(99)
-    
+    df['Status'] = df.apply(definir_status, axis=1)
+
+    # Ordenação Cronológica
     df = df.sort_values(by=['Data_Dt', col_hr]).reset_index(drop=False)
 
     st.title(f"🤝 Olá, {st.session_state.nome_usuario.split()[0]}")
 
-    # Filtros
     with st.sidebar:
-        f_dat = st.date_input("A partir de", datetime.now().date())
-        if st.button("Sair"): st.session_state.autenticado = False; st.rerun()
+        f_dat = st.date_input("Filtrar Data", datetime.now().date())
+        so_vagas = st.checkbox("Ver apenas vagas", value=False)
+        if st.button("Sair"): 
+            st.session_state.autenticado = False
+            st.rerun()
 
+    # Define df_f ANTES de usá-lo na tabela para evitar NameError
     df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Dt'].dt.date >= f_dat)].copy()
+    if so_vagas: 
+        df_f = df_f[df_f['Status'] != "🟢 Completo"]
 
-    # --- 6. EXIBIÇÃO EM CARDS (MOBILE FRIENDLY) ---
-    st.subheader("📋 Escala de Atividades")
-    st.caption("Abaixo estão as atividades disponíveis para seu nível.")
+    # --- 6. INSCRIÇÃO RÁPIDA ---
+    st.subheader("📝 Inscrição Rápida")
+    v_l = df_f[df_f['Status'] != "🟢 Completo"].copy()
+    if not v_l.empty:
+        v_l['label'] = v_l.apply(lambda x: f"{x['Nível']} | {x['Data_Dt'].strftime('%d/%m')} - {x[col_hr]} | {x[col_ev][:10]}..", axis=1)
+        esc = st.selectbox("Escolha a atividade:", v_l['label'].tolist(), index=None, placeholder="Selecione...")
+        if esc:
+            idx_vagas = v_l[v_l['label'] == esc].index[0]
+            if st.button("Inscrever-se", type="primary", width="stretch"):
+                linha_p = int(v_l.loc[idx_vagas, 'index']) + 2
+                val_v1 = str(sheet.cell(linha_p, 7).value).strip()
+                confirmar_dialog(sheet, linha_p, v_l.loc[idx_vagas], ("V1" if val_v1 == "" else "V2"), (7 if val_v1 == "" else 8), col_ev, col_hr)
+    
+    # --- 7. ESCALA (TABELA) ---
+    st.divider()
+    st.subheader("📋 Escala")
+    
+    df_show = df_f.copy()
+    df_show['Info (Nív-Data-Hora)'] = df_show.apply(
+        lambda x: f"{x['Nível']} - {x['Data_Dt'].strftime('%d/%m')} ({x['Dia_da_Semana']}) - {x[col_hr]}", axis=1
+    )
+    df_show = df_show.rename(columns={col_ev: 'Evento', 'Voluntário 1': 'V1', 'Voluntário 2': 'V2'})
+    
+    cols_display = ['Status', 'Info (Nív-Data-Hora)', 'Evento', 'V1', 'V2']
 
-    for i, row in df_f.iterrows():
-        status_texto, cor_fundo = definir_status(row)
-        
-        # Criando um container com borda para cada atividade
-        with st.container(border=True):
-            # Layout de colunas para Status e Data
-            c1, c2 = st.columns([1, 2])
-            c1.markdown(f"**{status_texto}**")
-            c2.markdown(f"📅 {row['Data_Dt'].strftime('%d/%m')} ({row['Dia_da_Semana']}) - {row[col_hr]}")
-            
-            # Título do Evento (Aqui ele quebra a linha automaticamente se for grande!)
-            st.markdown(f"### {row[col_ev]}")
-            st.markdown(f"🎓 **Nível:** {row['Nível']}")
-            
-            # Voluntários
-            v1 = row['Voluntário 1'] if row['Voluntário 1'] else "---"
-            v2 = row['Voluntário 2'] if row['Voluntário 2'] else "---"
-            st.markdown(f"👤 **V1:** {v1} | 👤 **V2:** {v2}")
-            
-            # Botão de Inscrição (Só aparece se houver vaga)
-            if "Completo" not in status_texto:
-                if st.button(f"Inscrever-se no Evento {i}", key=f"btn_{i}", use_container_width=True):
-                    linha_p = int(row['index']) + 2
-                    vaga_n = "Voluntário 1" if not row['Voluntário 1'] else "Voluntário 2"
-                    col_alvo = 7 if not row['Voluntário 1'] else 8
-                    confirmar_dialog(sheet, linha_p, row, vaga_n, col_alvo, col_ev)
-            else:
-                st.button("✅ Escala Completa", key=f"btn_{i}", disabled=True, use_container_width=True)
+    sel = st.dataframe(
+        df_show[cols_display].style.apply(aplicar_estilo_linha, axis=1), 
+        width="stretch", 
+        hide_index=True, 
+        on_select="rerun", 
+        selection_mode="single-row"
+    )
+
+    if sel.selection.rows:
+        r_idx = sel.selection.rows[0]
+        r_sel = df_f.iloc[r_idx]
+        if "Completo" not in r_sel['Status']:
+            linha_orig = int(r_sel['index']) + 2
+            v1_a = str(r_sel['Voluntário 1']).strip()
+            confirmar_dialog(sheet, linha_orig, r_sel, ("V1" if v1_a == "" else "V2"), (7 if v1_a == "" else 8), col_ev, col_hr)
 
 except Exception as e:
     st.error(f"Erro: {e}")
