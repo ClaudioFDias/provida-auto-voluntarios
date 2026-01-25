@@ -36,21 +36,50 @@ def load_data():
     df.columns = [col.strip() for col in df.columns]
     return sheet, df
 
-# --- 2. CONFIGS ---
-mapa_niveis = {"Nenhum": 0, "Básico": 1, "Av.1": 2, "Introdução": 3, "Av.2": 4, "Av.2|": 5, "Av.3": 6, "Av.3|": 7, "Av.4": 8}
-dias_semana = {0: "Seg", 1: "Ter", 2: "Qua", 3: "Qui", 4: "Sex", 5: "Sáb", 6: "Dom"}
-
-def definir_status(row):
-    v1, v2 = str(row.get('Voluntário 1', '')).strip(), str(row.get('Voluntário 2', '')).strip()
-    if v1 == "" and v2 == "": return "🔴 2 Vagas"
-    if v1 == "" or v2 == "": return "🟡 1 Vaga"
-    return "🟢 Completo"
-
+# --- 2. CONFIGS (Ajuste na função de estilo) ---
 def aplicar_estilo(row):
-    stat = definir_status(row)
-    if "2 Vagas" in stat: return ['background-color: #FFEBEE; color: black'] * len(row)
-    if "1 Vaga" in stat: return ['background-color: #FFF9C4; color: black'] * len(row)
-    return ['background-color: #FFFFFF; color: black'] * len(row)
+    # Buscamos o valor da célula que contém o emoji/status
+    stat = str(row.get('Status', ''))
+    
+    if "2 Vagas" in stat:
+        color = '#FFEBEE' # Vermelho claro
+    elif "1 Vaga" in stat:
+        color = '#FFF9C4' # Amarelo claro
+    elif "Completo" in stat:
+        color = '#FFFFFF' # Branco
+    else:
+        color = '#FFFFFF'
+        
+    return [f'background-color: {color}; color: black'] * len(row)
+
+# ... (restante do código igual) ...
+
+# --- 7. TABELA (Garantindo que a coluna Status exista para o estilo) ---
+st.subheader("📋 Escala")
+
+# Criamos uma cópia para exibição sem perder as colunas originais de teste
+df_display = df_f.copy()
+
+# Renomeamos apenas para o cabeçalho da tabela ficar bonito
+df_display = df_display.rename(columns={
+    col_ev: 'Evento', 
+    'Data_Formatada': 'Data', 
+    'Dia_da_Semana': 'Dia', 
+    'Voluntário 1': 'V1', 
+    'Voluntário 2': 'V2'
+})
+
+# Selecionamos as colunas na ordem correta
+cols_to_show = ['Status', 'Evento', 'Data', 'Dia', 'V1', 'V2']
+
+# Aplicamos o estilo diretamente no DataFrame de exibição
+sel = st.dataframe(
+    df_display[cols_to_show].style.apply(aplicar_estilo, axis=1), 
+    use_container_width=True, 
+    hide_index=True, 
+    on_select="rerun", 
+    selection_mode="single-row"
+)
 
 # --- 3. DIALOG ---
 @st.dialog("Confirmar")
