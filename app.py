@@ -62,17 +62,7 @@ def confirmar_dialog(sheet, linha, row, vaga_n, col_idx):
 
 # --- 4. STYLE ---
 st.set_page_config(page_title="ProVida Escala", layout="centered")
-
-st.markdown("""
-    <style>
-    .stButton > button:disabled {
-        background-color: #333333 !important;
-        color: white !important;
-        opacity: 1 !important;
-        border: 1px solid #111 !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
+st.markdown("""<style>.stButton > button:disabled { background-color: #333333 !important; color: white !important; opacity: 1 !important; border: 1px solid #111 !important; }</style>""", unsafe_allow_html=True)
 
 if 'user' not in st.session_state: st.session_state.user = None
 if 'modo_edicao' not in st.session_state: st.session_state.modo_edicao = False
@@ -85,19 +75,16 @@ if st.session_state.user is None:
     
     if st.session_state.modo_edicao:
         st.subheader("📝 Alterar Meus Dados")
-        email_busca = st.text_input("Confirme seu e-mail cadastrado para editar:").strip().lower()
+        with st.form("form_busca_edicao"):
+            email_busca = st.text_input("E-mail cadastrado:").strip().lower()
+            enviou_busca = st.form_submit_button("Buscar Cadastro", type="primary")
         
-        # Botão para verificar o e-mail na edição
-        btn_verificar = st.button("Buscar Cadastro", type="primary")
-        
-        if email_busca and (btn_verificar or (email_busca != "" and st.session_state.get('last_email_edit') != email_busca)):
-            st.session_state['last_email_edit'] = email_busca
+        if email_busca and enviou_busca:
             user_row = df_us[df_us['Email'].astype(str).str.lower() == email_busca]
-            
             if not user_row.empty:
                 dados = user_row.iloc[0]; idx_l = user_row.index[0] + 2
-                st.success("Cadastro encontrado! Atualize seus dados abaixo:")
-                with st.form("edicao_form"):
+                st.info("Cadastro encontrado! Atualize abaixo:")
+                with st.form("edicao_final"):
                     n_e = st.text_input("Nome Crachá:", value=dados['Nome'])
                     t_e = st.text_input("Telefone:", value=dados['Telefone'])
                     d_atuais = str(dados['Departamentos']).split(",") if dados['Departamentos'] else []
@@ -105,49 +92,48 @@ if st.session_state.user is None:
                     niv_l = list(cores_niveis.keys())
                     niv_e = st.selectbox("Nível:", niv_l, index=niv_l.index(dados['Nivel']) if dados['Nivel'] in niv_l else 0)
                     
-                    if st.form_submit_button("Salvar Novas Informações"):
-                        sheet_us.update(f"A{idx_l}:E{idx_l}", [[email_busca, n_e, t_e, ",".join(d_e), niv_e]])
-                        st.success("Dados atualizados com sucesso!"); st.session_state.modo_edicao = False
-                        st.cache_resource.clear(); st.rerun()
+                    if st.form_submit_button("Salvar Alterações"):
+                        novos_dados = [[email_busca, n_e, t_e, ",".join(d_e), niv_e]]
+                        sheet_us.update(f"A{idx_l}:E{idx_l}", novos_dados)
+                        # RESET TOTAL para garantir que o nível atualize no próximo login
+                        st.session_state.user = None
+                        st.session_state.modo_edicao = False
+                        st.cache_resource.clear()
+                        st.success("Dados salvos! Por favor, faça login novamente.")
+                        st.rerun()
             else:
-                st.error("E-mail não encontrado em nossa base de dados.")
+                st.error("E-mail não encontrado.")
         
-        st.markdown("---")
-        if st.button("Voltar para o Login"):
+        if st.button("Voltar para Login"):
             st.session_state.modo_edicao = False
             st.rerun()
             
     else:
-        # TELA DE LOGIN
-        email_in = st.text_input("Digite seu e-mail para entrar:").strip().lower()
-        btn_entrar = st.button("Entrar no Sistema", type="primary")
+        # TELA DE LOGIN COM FORM (GARANTE O ENTER)
+        with st.form("login_form"):
+            email_in = st.text_input("Digite seu e-mail para entrar:").strip().lower()
+            btn_entrar = st.form_submit_button("Entrar no Sistema", type="primary")
         
-        if email_in and (btn_entrar or (email_in != "" and st.session_state.get('last_email') != email_in)):
-            st.session_state['last_email'] = email_in
+        if email_in and btn_entrar:
             u_row = df_us[df_us['Email'].astype(str).str.lower() == email_in]
-            
             if not u_row.empty:
                 st.session_state.user = u_row.iloc[0].to_dict()
                 st.rerun()
             else:
-                st.info("E-mail não cadastrado. Preencha os dados para criar seu perfil:")
+                st.info("E-mail não cadastrado. Crie seu perfil:")
                 with st.form("cad_novo"):
-                    nc = st.text_input("Nome Crachá:")
-                    tc = st.text_input("Telefone (XX)XXXXX-XXXX:")
-                    dc = st.multiselect("Departamentos que participa:", lista_deps_fixa)
-                    nvc = st.selectbox("Nível do Curso:", list(cores_niveis.keys()))
-                    if st.form_submit_button("Criar Perfil e Acessar"):
+                    nc = st.text_input("Nome Crachá:"); tc = st.text_input("Telefone:")
+                    dc = st.multiselect("Departamentos:", lista_deps_fixa)
+                    nvc = st.selectbox("Nível:", list(cores_niveis.keys()))
+                    if st.form_submit_button("Cadastrar e Entrar"):
                         if nc and tc and dc:
                             sheet_us.append_row([email_in, nc, tc, ",".join(dc), nvc])
                             st.session_state.user = {"Email": email_in, "Nome": nc, "Telefone": tc, "Departamentos": ",".join(dc), "Nivel": nvc}
                             st.cache_resource.clear(); st.rerun()
-                        else:
-                            st.error("Preencha todos os campos.")
         
         st.divider()
         if st.button("⚙️ Alterar Meus Dados"):
-            st.session_state.modo_edicao = True
-            st.rerun()
+            st.session_state.modo_edicao = True; st.rerun()
     st.stop()
 
 # --- 6. DASHBOARD ---
@@ -156,9 +142,9 @@ st.title(f"🤝 Olá, {user['Nome'].split()[0]}!")
 
 filtro_status = st.pills("Status da Vaga:", ["Tudo", "Minhas Inscrições", "Vagas Abertas"], default="Tudo")
 
-with st.expander("📅 Filtros de Data, Nível e Departamento"):
+with st.expander("📅 Mais Opções de Filtro"):
     c1, c2 = st.columns(2)
-    f_data = c1.date_input("Ver a partir de:", datetime.now().date())
+    f_data = c1.date_input("A partir de:", datetime.now().date())
     todos_niveis = sorted(df_ev['Nível'].unique().tolist())
     f_nivel = c2.multiselect("Nível específico:", todos_niveis)
     f_depto = st.multiselect("Departamentos:", lista_deps_fixa, default=lista_deps_fixa)
@@ -184,19 +170,17 @@ if filtro_status == "Minhas Inscrições":
 elif filtro_status == "Vagas Abertas":
     df_f = df_f[df_f.apply(lambda x: str(x['Voluntário 1']).strip() == "" or str(x['Voluntário 2']).strip() == "", axis=1)]
 
-st.subheader(f"📋 Atividades: {len(df_f)}")
-
 for i, row in df_f.iterrows():
     v1, v2 = str(row['Voluntário 1']).strip(), str(row['Voluntário 2']).strip()
     bg = cores_niveis.get(str(row['Nível']).strip(), "#FFFFFF")
     tx = "#FFFFFF" if "AV2" in str(row['Nível']) else "#000000"
-    st_vaga = "🟢 Completo" if v1 and v2 else ("🟡 1 Vaga" if v1 or v2 else "🔴 2 Vagas")
     ja_in = (v1.lower() == user['Nome'].lower() or v2.lower() == user['Nome'].lower())
 
     st.markdown(f"""
         <div style="background-color: {bg}; padding: 15px; border-radius: 10px 10px 0 0; border: 1px solid #ddd; color: {tx}; margin-top: 15px;">
             <div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 0.85em;">
-                <span>{st_vaga}</span><span>{row['Data_Dt'].strftime('%d/%m')}</span>
+                <span>{"🟢 Completo" if v1 and v2 else ("🟡 1 Vaga" if v1 or v2 else "🔴 2 Vagas")}</span>
+                <span>{row['Data_Dt'].strftime('%d/%m')}</span>
             </div>
             <h3 style="margin: 5px 0; color: {tx}; border: none;">{row['Nome do Evento']}</h3>
             <div style="font-size: 0.9em; font-weight: 600; opacity: 0.85; margin-bottom: 5px;">🏢 {row['Departamento']}</div>
