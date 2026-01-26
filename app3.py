@@ -36,27 +36,25 @@ def load_data():
     df.columns = [col.strip() for col in df.columns]
     return sheet, df
 
-# --- 2. CONFIGURAÇÕES VISUAIS E MAPEAMENTO ---
-# Cores de fundo por nível
+# --- 2. CONFIGURAÇÕES VISUAIS ---
 cores_niveis = {
     "Nenhum": "#FFFFFF",
     "BAS": "#C8E6C9",      # Verde Claro
     "AV1": "#FFCDD2",      # Vermelho Claro
     "IN": "#BBDEFB",       # Azul Claro
-    "AV2": "#B71C1C",      # Vermelho Escuro
-    "AV2-24": "#B71C1C",   # Vermelho Escuro
-    "AV2-23": "#B71C1C",   # Vermelho Escuro
-    "Av.2/": "#B71C1C",    # Vermelho Escuro
-    "AV3": "#E1BEE7",      # Roxo Claro (p/ leitura) ou #4A148C se quiser escuro
+    "AV2": "#795548",      # Marrom
+    "AV2-24": "#795548",   # Marrom
+    "AV2-23": "#795548",   # Marrom
+    "Av.2/": "#795548",    # Marrom
+    "AV3": "#E1BEE7",      # Roxo Claro
     "AV3A": "#E1BEE7",
     "AV3/": "#E1BEE7",
     "AV4": "#FFF9C4",      # Amarelo
     "AV4A": "#FFF9C4"
 }
 
-# Cores de texto (ajusta para branco se o fundo for muito escuro)
 def cor_texto(nivel):
-    if "AV2" in nivel: return "#FFFFFF" # Texto branco para fundos vermelhos escuros
+    if "AV2" in nivel: return "#FFFFFF"
     return "#000000"
 
 mapa_niveis_num = {k: i for i, k in enumerate(cores_niveis.keys())}
@@ -81,7 +79,7 @@ def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev, col_hr):
         st.rerun()
 
 # --- 4. LOGIN ---
-st.set_page_config(page_title="ProVida", layout="centered")
+st.set_page_config(page_title="ProVida Escala", layout="centered")
 
 if 'autenticado' not in st.session_state: st.session_state.autenticado = False
 
@@ -118,49 +116,54 @@ try:
 
     df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Dt'].dt.date >= f_dat)].copy()
 
-    # --- 6. RENDERIZAÇÃO DOS CARDS ---
+    # --- 6. CARDS ---
+    st.subheader("📋 Escala de Atividades")
+    
     for i, row in df_f.iterrows():
         status_txt = info_status(row)
         nivel_row = str(row['Nível']).strip()
         bg_cor = cores_niveis.get(nivel_row, "#FFFFFF")
         txt_cor = cor_texto(nivel_row)
+        
+        # Limpar texto de voluntários se estiver vago
+        v1_val = str(row['Voluntário 1']).strip()
+        v2_val = str(row['Voluntário 2']).strip()
+        
+        v1_display = v1_val if v1_val != "" else ""
+        v2_display = v2_val if v2_val != "" else ""
 
-        # HTML/CSS para o Card Customizado
         st.markdown(f"""
             <div style="
                 background-color: {bg_cor}; 
-                padding: 20px; 
-                border-radius: 10px; 
+                padding: 15px; 
+                border-radius: 10px 10px 0 0; 
                 border: 1px solid #ddd; 
-                margin-bottom: 10px;
                 color: {txt_cor};
+                margin-top: 15px;
             ">
-                <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 0.9em; opacity: 0.9;">
+                <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 0.85em; opacity: 0.9;">
                     <span>{status_txt}</span>
                     <span>{row['Data_Dt'].strftime('%d/%m')} - {row['Dia_Extenso']}</span>
                 </div>
-                <h2 style="margin: 10px 0; color: {txt_cor}; border: none;">{row[col_ev]}</h2>
-                <div style="font-size: 1.1em; margin-bottom: 10px;">
-                    ⏰ <b>Horário:</b> {row[col_hr]} | 🎓 <b>Nível:</b> {nivel_row}
+                <h3 style="margin: 8px 0; color: {txt_cor}; border: none; font-size: 1.2em;">{row[col_ev]}</h3>
+                <div style="font-size: 1em; margin-bottom: 8px;">
+                    ⏰ <b>Hora:</b> {row[col_hr]} | 🎓 <b>Nível:</b> {nivel_row}
                 </div>
-                <div style="background: rgba(255,255,255,0.2); padding: 10px; border-radius: 5px;">
-                    👤 <b>V1:</b> {row['Voluntário 1'] if row['Voluntário 1'] else 'Vago'}<br>
-                    👤 <b>V2:</b> {row['Voluntário 2'] if row['Voluntário 2'] else 'Vago'}
+                <div style="background: rgba(0,0,0,0.1); padding: 8px; border-radius: 5px; font-size: 0.95em;">
+                    👤 <b>V1:</b> {v1_display}<br>
+                    👤 <b>V2:</b> {v2_display}
                 </div>
             </div>
         """, unsafe_allow_html=True)
 
-        # Botão de Inscrição fora do HTML (Streamlit não permite botões dentro de f-strings HTML)
         if "Completo" not in status_txt:
-            if st.button(f"Inscrever-se no evento acima", key=f"btn_{i}", type="primary", width="stretch"):
+            if st.button(f"Quero me inscrever", key=f"btn_{i}", type="primary", width="stretch"):
                 linha_planilha = int(row['index']) + 2
-                vaga_nome = "Voluntário 1" if not row['Voluntário 1'] else "Voluntário 2"
-                coluna_idx = 7 if not row['Voluntário 1'] else 8
+                vaga_nome = "Voluntário 1" if v1_val == "" else "Voluntário 2"
+                coluna_idx = 7 if v1_val == "" else 8
                 confirmar_dialog(sheet, linha_planilha, row, vaga_nome, coluna_idx, col_ev, col_hr)
         else:
             st.button("✅ Escala Completa", key=f"btn_{i}", disabled=True, width="stretch")
-        
-        st.write("") # Espaçador entre cards
 
 except Exception as e:
     st.error(f"Erro: {e}")
