@@ -108,16 +108,50 @@ try:
 
     st.title(f"🤝 Olá, {st.session_state.nome_usuario.split()[0]}")
 
+    # --- 6. BARRA LATERAL (FILTROS) ---
     with st.sidebar:
-        f_dat = st.date_input("Filtrar por data:", datetime.now().date())
+        st.header("Filtros")
+        f_dat = st.date_input("A partir de:", datetime.now().date())
+        
+        st.divider()
+        # Filtro por Nível Específico
+        niveis_disp = sorted(df['Nível'].unique().tolist())
+        f_nivel = st.multiselect("Nível específico:", niveis_disp)
+        
+        st.divider()
+        # Flags de Status
+        so_meus = st.checkbox("Minhas Inscrições")
+        so_vazios = st.checkbox("Sem nenhum voluntário")
+        
+        st.divider()
         if st.button("Sair"): 
             st.session_state.autenticado = False
             st.rerun()
 
+    # Aplicação da lógica de filtros
     df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Dt'].dt.date >= f_dat)].copy()
 
-    # --- 6. CARDS ---
-    st.subheader("📋 Escala de Atividades")
+    if f_nivel:
+        df_f = df_f[df_f['Nível'].isin(f_nivel)]
+
+    if so_meus:
+        nome = st.session_state.nome_usuario.strip().lower()
+        df_f = df_f[
+            (df_f['Voluntário 1'].astype(str).str.lower().str.contains(nome)) | 
+            (df_f['Voluntário 2'].astype(str).str.lower().str.contains(nome))
+        ]
+
+    if so_vazios:
+        df_f = df_f[
+            (df_f['Voluntário 1'].astype(str).str.strip() == "") & 
+            (df_f['Voluntário 2'].astype(str).str.strip() == "")
+        ]
+
+    # --- 7. EXIBIÇÃO DOS CARDS ---
+    st.subheader(f"📋 Escala ({len(df_f)} atividades)")
+    
+    if df_f.empty:
+        st.warning("Nenhuma atividade encontrada para os filtros aplicados.")
     
     for i, row in df_f.iterrows():
         status_txt = info_status(row)
@@ -125,12 +159,8 @@ try:
         bg_cor = cores_niveis.get(nivel_row, "#FFFFFF")
         txt_cor = cor_texto(nivel_row)
         
-        # Limpar texto de voluntários se estiver vago
         v1_val = str(row['Voluntário 1']).strip()
         v2_val = str(row['Voluntário 2']).strip()
-        
-        v1_display = v1_val if v1_val != "" else ""
-        v2_display = v2_val if v2_val != "" else ""
 
         st.markdown(f"""
             <div style="
@@ -147,11 +177,11 @@ try:
                 </div>
                 <h3 style="margin: 8px 0; color: {txt_cor}; border: none; font-size: 1.2em;">{row[col_ev]}</h3>
                 <div style="font-size: 1em; margin-bottom: 8px;">
-                    ⏰ <b>Hora:</b> {row[col_hr]} | 🎓 <b>Nível:</b> {nivel_row}
+                    ⏰ <b>Horário:</b> {row[col_hr]} | 🎓 <b>Nível:</b> {nivel_row}
                 </div>
                 <div style="background: rgba(0,0,0,0.1); padding: 8px; border-radius: 5px; font-size: 0.95em;">
-                    👤 <b>V1:</b> {v1_display}<br>
-                    👤 <b>V2:</b> {v2_display}
+                    👤 <b>Voluntário 1:</b> {v1_val}<br>
+                    👤 <b>Voluntário 2:</b> {v2_val}
                 </div>
             </div>
         """, unsafe_allow_html=True)
@@ -163,7 +193,11 @@ try:
                 coluna_idx = 7 if v1_val == "" else 8
                 confirmar_dialog(sheet, linha_planilha, row, vaga_nome, coluna_idx, col_ev, col_hr)
         else:
-            st.button("✅ Escala Completa", key=f"btn_{i}", disabled=True, width="stretch")
+            # Se o usuário logado for um dos voluntários, ele vê uma mensagem diferente
+            if st.session_state.nome_usuario.lower() in [v1_val.lower(), v2_val.lower()]:
+                st.button("✅ Você está inscrito", key=f"btn_{i}", disabled=True, width="stretch")
+            else:
+                st.button("✅ Escala Completa", key=f"btn_{i}", disabled=True, width="stretch")
 
 except Exception as e:
     st.error(f"Erro: {e}")
