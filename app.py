@@ -59,108 +59,101 @@ mapa_niveis_num = {k: i for i, k in enumerate(cores_niveis.keys())}
 @st.dialog("Confirmar Inscrição")
 def confirmar_dialog(sheet, linha, row, vaga_n, col_idx):
     st.markdown(f"### {row['Nome do Evento']}")
+    st.write(f"📅 **Data:** {row['Data_Dt'].strftime('%d/%m')}")
     st.write(f"👤 **Vaga:** {vaga_n}")
     if st.button("Confirmar", type="primary", width="stretch"):
         sheet.update_cell(linha, col_idx, st.session_state.user['Nome'])
         st.cache_resource.clear()
         st.rerun()
 
-# --- 4. ESTILO E ESTADO ---
+# --- 4. ESTILO GLOBAL ---
 st.set_page_config(page_title="ProVida Escala", layout="centered")
+
+# CSS Reforçado para botões de inscrição (Inscrito/Completo)
+st.markdown("""
+    <style>
+    /* Estiliza botões desabilitados para ficarem escuros e legíveis */
+    .stButton > button:disabled {
+        background-color: #333333 !important;
+        color: white !important;
+        opacity: 1 !important;
+        border: 1px solid #111 !important;
+        font-weight: bold !important;
+    }
+    /* Estilo para botões primários (Quero me inscrever) */
+    .stButton > button[kind="primary"] {
+        font-weight: bold !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 if 'user' not in st.session_state: st.session_state.user = None
 if 'modo_edicao' not in st.session_state: st.session_state.modo_edicao = False
 
 sheet_ev, sheet_us, df_ev, df_us = load_data()
 
-# --- 5. FLUXO DE LOGIN / CADASTRO / EDIÇÃO ---
+# --- 5. FLUXO DE ACESSO ---
 if st.session_state.user is None:
     st.title("🤝 Escala de Voluntários")
     
-    # MODO EDIÇÃO DE DADOS
     if st.session_state.modo_edicao:
         st.subheader("📝 Alterar Meus Dados")
         email_busca = st.text_input("Confirme seu e-mail cadastrado:").strip().lower()
-        
         if email_busca:
             user_row = df_us[df_us['Email'].astype(str).str.lower() == email_busca]
-            
             if not user_row.empty:
                 dados_atuais = user_row.iloc[0]
-                idx_linha = user_row.index[0] + 2 # +2 compensa cabeçalho e 0-index
-                
+                idx_linha = user_row.index[0] + 2
                 with st.form("form_edicao"):
                     nome_e = st.text_input("Nome no crachá:", value=dados_atuais['Nome'])
                     tel_e = st.text_input("Telefone:", value=dados_atuais['Telefone'])
-                    # Converte string de deptos da planilha em lista para o multiselect
                     deps_atuais = str(dados_atuais['Departamentos']).split(",") if dados_atuais['Departamentos'] else []
                     deps_e = st.multiselect("Departamentos:", lista_deps, default=[d for d in deps_atuais if d in lista_deps])
-                    
-                    # Encontra o index do nível atual para o selectbox
                     niveis_lista = list(cores_niveis.keys())
-                    try:
-                        idx_niv = niveis_lista.index(dados_atuais['Nivel'])
-                    except:
-                        idx_niv = 0
+                    try: idx_niv = niveis_lista.index(dados_atuais['Nivel'])
+                    except: idx_niv = 0
                     niv_e = st.selectbox("Nível do Curso:", niveis_lista, index=idx_niv)
-                    
                     if st.form_submit_button("Salvar Alterações"):
                         novos_dados = [email_busca, nome_e, tel_e, ",".join(deps_e), niv_e]
-                        # Atualiza a linha inteira na planilha
                         sheet_us.update(f"A{idx_linha}:E{idx_linha}", [novos_dados])
-                        st.success("Dados atualizados com sucesso!")
+                        st.success("Dados atualizados!")
                         st.session_state.modo_edicao = False
-                        st.cache_resource.clear()
-                        st.rerun()
-            else:
-                st.error("Este e-mail não foi encontrado no sistema.")
-        
-        if st.button("Voltar para Login"):
-            st.session_state.modo_edicao = False
-            st.rerun()
+                        st.cache_resource.clear(); st.rerun()
+            else: st.error("E-mail não encontrado.")
+        if st.button("Voltar"): st.session_state.modo_edicao = False; st.rerun()
             
-    # MODO LOGIN NORMAL
     else:
         email_input = st.text_input("Digite seu e-mail para entrar:").strip().lower()
-        
         if email_input:
             user_row = df_us[df_us['Email'].astype(str).str.lower() == email_input]
-            
             if not user_row.empty:
                 st.session_state.user = user_row.iloc[0].to_dict()
                 st.rerun() 
             else:
                 st.info("E-mail não cadastrado. Crie seu perfil:")
                 with st.form("cadastro_form"):
-                    nome_c = st.text_input("Nome como está no crachá:")
-                    tel_c = st.text_input("Telefone (ex: 11999999999):")
-                    deps_c = st.multiselect("Departamentos que você participa:", lista_deps)
-                    niv_c = st.selectbox("Nível do Curso:", list(cores_niveis.keys()))
-                    
-                    if st.form_submit_button("Criar Perfil e Entrar"):
+                    nome_c = st.text_input("Nome Crachá:")
+                    tel_c = st.text_input("Telefone:")
+                    deps_c = st.multiselect("Departamentos:", lista_deps)
+                    niv_c = st.selectbox("Nível:", list(cores_niveis.keys()))
+                    if st.form_submit_button("Criar e Entrar"):
                         if nome_c and tel_c and deps_c:
-                            novo_user = [email_input, nome_c, tel_c, ",".join(deps_c), niv_c]
-                            sheet_us.append_row(novo_user)
+                            sheet_us.append_row([email_input, nome_c, tel_c, ",".join(deps_c), niv_c])
                             st.session_state.user = {"Email": email_input, "Nome": nome_c, "Telefone": tel_c, "Departamentos": ",".join(deps_c), "Nivel": niv_c}
-                            st.cache_resource.clear()
-                            st.rerun()
-        
+                            st.cache_resource.clear(); st.rerun()
         st.markdown("---")
-        if st.button("⚙️ Alterar Meus Dados"):
-            st.session_state.modo_edicao = True
-            st.rerun()
+        if st.button("⚙️ Alterar Meus Dados"): st.session_state.modo_edicao = True; st.rerun()
     st.stop()
 
-# --- 6. DASHBOARD (LOGADO) ---
+# --- 6. DASHBOARD ---
 user = st.session_state.user
 st.title(f"🤝 Olá, {user['Nome'].split()[0]}!")
 
-# Lógica de Escala (Mantida conforme versões anteriores)
 meus_deps = str(user['Departamentos']).split(",")
 nivel_max_num = mapa_niveis_num.get(user['Nivel'], 0)
 
 with st.expander("🔍 Filtros"):
-    f_dat = st.date_input("Ver a partir de:", datetime.now().date())
+    f_dat = st.date_input("A partir de:", datetime.now().date())
     filtro_status = st.pills("Status:", ["Tudo", "Minhas Inscrições", "Vagas Abertas"], default="Tudo")
 
 df_ev['Data_Dt'] = pd.to_datetime(df_ev['Data Específica'], errors='coerce', dayfirst=True)
@@ -179,7 +172,7 @@ if filtro_status == "Minhas Inscrições":
 elif filtro_status == "Vagas Abertas":
     df_f = df_f[df_f.apply(lambda x: str(x['Voluntário 1']).strip() == "" or str(x['Voluntário 2']).strip() == "", axis=1)]
 
-# Exibição de Cards
+# Exibição
 if df_f.empty:
     st.info("Nenhuma atividade disponível para seu perfil.")
 else:
@@ -205,11 +198,11 @@ else:
         """, unsafe_allow_html=True)
 
         if ja_in:
-            st.button("✅ VOCÊ JÁ ESTÁ INSCRITO", key=f"btn_{i}", disabled=True, width="stretch")
+            st.button("✅ VOCÊ JÁ ESTÁ INSCRITO", key=f"btn_in_{i}", disabled=True, width="stretch")
         elif v1 and v2:
-            st.button("🚫 ESCALA COMPLETA", key=f"btn_{i}", disabled=True, width="stretch")
+            st.button("🚫 ESCALA COMPLETA", key=f"btn_full_{i}", disabled=True, width="stretch")
         else:
-            if st.button("Quero me inscrever", key=f"btn_{i}", type="primary", width="stretch"):
+            if st.button("Quero me inscrever", key=f"btn_go_{i}", type="primary", width="stretch"):
                 v_alvo, c_alvo = ("Voluntário 1", 8) if v1 == "" else ("Voluntário 2", 9)
                 confirmar_dialog(sheet_ev, int(row['index'])+2, row, v_alvo, c_alvo)
 
