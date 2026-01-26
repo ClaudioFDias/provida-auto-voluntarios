@@ -50,7 +50,8 @@ mapa_niveis_num = {k: i for i, k in enumerate(cores_niveis.keys())}
 dias_semana_extenso = {0: "Segunda", 1: "Terça", 2: "Quarta", 3: "Quinta", 4: "Sexta", 5: "Sábado", 6: "Domingo"}
 
 def info_status(row):
-    v1, v2 = str(row.get('Voluntário 1', '')).strip(), str(row.get('Voluntário 2', '')).strip()
+    v1 = str(row.get('Voluntário 1', '')).strip()
+    v2 = str(row.get('Voluntário 2', '')).strip()
     if v1 == "" and v2 == "": return "🔴 2 Vagas"
     if v1 == "" or v2 == "": return "🟡 1 Vaga"
     return "🟢 Completo"
@@ -64,13 +65,23 @@ def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev, col_hr):
     
     if st.button("Confirmar", type="primary", width="stretch"):
         with st.spinner("Registrando..."):
-            # Atualiza a célula correta na planilha (G para V1, H para V2)
             sheet.update_cell(linha, col_idx, st.session_state.nome_usuario)
             st.cache_resource.clear()
             st.rerun()
 
 # --- 4. LOGIN ---
 st.set_page_config(page_title="ProVida Escala", layout="centered")
+
+# CSS para escurecer botões desabilitados
+st.markdown("""
+    <style>
+    .stButton > button:disabled {
+        background-color: #333333 !important;
+        color: white !important;
+        opacity: 1 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 if 'autenticado' not in st.session_state: st.session_state.autenticado = False
 
@@ -98,7 +109,6 @@ try:
 
     st.title(f"🤝 Olá, {st.session_state.nome_usuario.split()[0]}")
     
-    # Filtros Rápidos
     st.write("🔍 **Filtros Rápidos:**")
     filtro_status = st.pills("Ver apenas:", ["Tudo", "Minhas Inscrições", "Sem Voluntários", "Vagas Abertas"], default="Tudo")
     
@@ -128,40 +138,47 @@ try:
         bg_cor = cores_niveis.get(nivel_row, "#FFFFFF")
         txt_cor = cor_texto(nivel_row)
         
-        v1_val, v2_val = str(row['Voluntário 1']).strip(), str(row['Voluntário 2']).strip()
+        # Limpeza rigorosa para evitar erro de substituição
+        v1_val = str(row.get('Voluntário 1', '')).strip()
+        v2_val = str(row.get('Voluntário 2', '')).strip()
         usuario_logado = st.session_state.nome_usuario.strip().lower()
         
-        # Verificações de Segurança
         ja_inscrito = (v1_val.lower() == usuario_logado or v2_val.lower() == usuario_logado)
         cheio = (v1_val != "" and v2_val != "")
 
+        # Card Visual
         st.markdown(f"""
             <div style="background-color: {bg_cor}; padding: 15px; border-radius: 10px 10px 0 0; border: 1px solid #ddd; color: {txt_cor}; margin-top: 15px;">
-                <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 0.85em; opacity: 0.9;">
-                    <span>{status_txt}</span>
-                    <span>{row['Data_Dt'].strftime('%d/%m')} - {row['Dia_Extenso']}</span>
+                <div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 0.9em;">
+                    <span style="color: {txt_cor};">{status_txt}</span>
+                    <span style="color: {txt_cor};">{row['Data_Dt'].strftime('%d/%m')} - {row['Dia_Extenso']}</span>
                 </div>
                 <h3 style="margin: 8px 0; color: {txt_cor}; border: none; font-size: 1.2em;">{row[col_ev]}</h3>
                 <div style="font-size: 1em; margin-bottom: 8px;">
                     ⏰ <b>Horário:</b> {row[col_hr]} | 🎓 <b>Nível:</b> {nivel_row}
                 </div>
-                <div style="background: rgba(0,0,0,0.1); padding: 8px; border-radius: 5px; font-size: 0.95em;">
-                    👤 <b>Voluntário 1:</b> {v1_val}<br>
-                    👤 <b>Voluntário 2:</b> {v2_val}
+                <div style="background: rgba(0,0,0,0.15); padding: 8px; border-radius: 5px; font-size: 0.95em; border: 1px solid rgba(0,0,0,0.1);">
+                    <b style="color: {txt_cor};">👤 Voluntário 1:</b> {v1_val}<br>
+                    <b style="color: {txt_cor};">👤 Voluntário 2:</b> {v2_val}
                 </div>
             </div>
         """, unsafe_allow_html=True)
 
-        # Lógica do Botão com as Correções solicitadas
+        # BOTÕES COM LÓGICA DE SEGURANÇA REFORÇADA
         if ja_inscrito:
-            st.button("✅ Você já está inscrito", key=f"btn_{i}", disabled=True, width="stretch")
+            st.button("✅ VOCÊ JÁ ESTÁ INSCRITO", key=f"btn_{i}", disabled=True, width="stretch")
         elif cheio:
-            st.button("🚫 Escala Completa", key=f"btn_{i}", disabled=True, width="stretch")
+            st.button("🚫 ESCALA COMPLETA", key=f"btn_{i}", disabled=True, width="stretch")
         else:
             if st.button(f"Quero me inscrever", key=f"btn_{i}", type="primary", width="stretch"):
-                # DETERMINA A VAGA CORRETA: Se V1 ocupado, vai para V2
-                vaga_alvo = "Voluntário 2" if v1_val != "" else "Voluntário 1"
-                coluna_alvo = 8 if v1_val != "" else 7 # Coluna 7=G (V1), 8=H (V2)
+                # Lógica de alocação: se o campo V1 for nulo, vazio ou conter apenas espaços
+                if v1_val == "":
+                    vaga_alvo = "Voluntário 1"
+                    coluna_alvo = 7 # Coluna G
+                else:
+                    vaga_alvo = "Voluntário 2"
+                    coluna_alvo = 8 # Coluna H
+                
                 confirmar_dialog(sheet, int(row['index'])+2, row, vaga_alvo, coluna_alvo, col_ev, col_hr)
 
     st.divider()
