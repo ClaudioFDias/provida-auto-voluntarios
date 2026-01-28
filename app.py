@@ -59,7 +59,7 @@ dias_semana = {
 def confirmar_dialog(sheet, linha, row, vaga_n, col_idx):
     dia_pt = dias_semana.get(row['Data_Dt'].strftime('%A'), "")
     st.markdown(f"### {row['Nível']} - {row['Nome do Evento']}")
-    st.write(f"📅 **Data:** {dia_pt} {row['Data_Dt'].strftime('%d/%m/%Y')}")
+    st.write(f"📅 **Data:** {dia_pt} - {row['Data_Dt'].strftime('%d/%m/%Y')}")
     st.write(f"⏰ **Horário:** {row['Horario']} | 🏢 **Depto:** {row['Departamento']}")
     st.divider()
     if st.button("Confirmar Inscrição", type="primary", width="stretch"):
@@ -71,29 +71,27 @@ st.set_page_config(page_title="ProVida Escala", layout="centered")
 
 st.markdown("""
     <style>
-    html, body, [class*="st-at"], .stMarkdown p { font-size: 1.1rem !important; }
+    html, body, [class*="st-at"], .stMarkdown p { font-size: 1.15rem !important; }
     .stSelectbox label, .stMultiSelect label, .stDateInput label, .stPills label {
-        font-size: 1.2rem !important; font-weight: bold !important;
+        font-size: 1.3rem !important; font-weight: bold !important;
     }
-    div.stButton > button:first-child[kind="primary"] { font-size: 1.3rem !important; height: 3.5rem !important; }
     
-    /* Card Slim */
+    /* Card Slim Ajustado */
     .card-container {
-        padding: 12px 15px; 
+        padding: 15px; 
         border-radius: 12px 12px 0 0; 
         border: 1px solid #ddd; 
         margin-top: 15px;
     }
     .card-header { display: flex; justify-content: space-between; align-items: center; font-weight: 800; }
-    .card-title { margin: 5px 0; font-size: 1.3em; line-height: 1.2; }
-    .card-info { font-size: 0.95em; margin-bottom: 5px; opacity: 0.9; }
+    .card-title { margin: 8px 0; font-size: 1.45em; line-height: 1.2; }
+    .card-info-row { font-size: 1.1rem; margin-bottom: 10px; font-weight: 800; }
     .voluntarios-box { 
-        background: rgba(0,0,0,0.08); 
-        padding: 8px; 
+        background: rgba(0,0,0,0.07); 
+        padding: 10px; 
         border-radius: 8px; 
-        font-size: 0.9em; 
-        display: flex; 
-        justify-content: space-between;
+        font-size: 1rem; 
+        line-height: 1.5;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -103,9 +101,8 @@ if 'modo_edicao' not in st.session_state: st.session_state.modo_edicao = False
 
 sheet_ev, sheet_us, df_ev, df_us = load_data()
 
-# --- 5. ACESSO (Oculto para brevidade, mantido igual) ---
+# --- 5. ACESSO ---
 if st.session_state.user is None:
-    # ... (mesmo código de login/cadastro anterior)
     st.title("🤝 Escala de Voluntários")
     with st.form("login"):
         em = st.text_input("E-mail para entrar:").strip().lower()
@@ -115,6 +112,7 @@ if st.session_state.user is None:
             else: st.session_state['novo_em'] = em
     if 'novo_em' in st.session_state:
         with st.form("cad"):
+            st.info("E-mail novo. Crie seu perfil:")
             nc = st.text_input("Nome Crachá:"); tc = st.text_input("Telefone:")
             dc = st.multiselect("Departamentos:", lista_deps_fixa); nv = st.selectbox("Nível:", list(cores_niveis.keys()))
             if st.form_submit_button("Cadastrar"):
@@ -130,7 +128,7 @@ st.title(f"🤝 Olá, {user['Nome'].split()[0]}!")
 filtro_status = st.pills("Status:", ["Vagas Abertas", "Minhas Inscrições", "Tudo"], default="Vagas Abertas")
 f_depto_pill = st.pills("Departamento:", ["Todos"] + lista_deps_fixa, default="Todos")
 
-# Processamento de dados
+# Processamento
 df_ev['Data_Dt'] = pd.to_datetime(df_ev['Data Específica'], errors='coerce', dayfirst=True)
 df_ev['Niv_N'] = df_ev['Nível'].astype(str).str.strip().map(mapa_niveis_num).fillna(99)
 df_ev = df_ev.sort_values(by=['Data_Dt', 'Horario']).reset_index(drop=False)
@@ -153,20 +151,22 @@ for i, row in df_f.iterrows():
     st.markdown(f"""
         <div class="card-container" style="background-color: {bg}; color: {tx};">
             <div class="card-header">
-                <span style="font-size: 0.9em; opacity: 0.8;">{st_vaga}</span>
-                <span style="font-size: 1.3em;">{dia_abreviado} {row['Data_Dt'].strftime('%d/%m')}</span>
+                <span style="font-size: 0.95em; opacity: 0.85;">{st_vaga}</span>
+                <span style="font-size: 1.45em;">{dia_abreviado} - {row['Data_Dt'].strftime('%d/%m')}</span>
             </div>
             <h2 class="card-title" style="color: {tx};">{row['Nível']} - {row['Nome do Evento']}</h2>
-            <div class="card-info">🏢 {row['Departamento']} | ⏰ {row['Horario']}</div>
+            <div class="card-info-row">
+                <span>🏢 {row['Departamento']}</span> &nbsp;&nbsp; | &nbsp;&nbsp; <span>⏰ {row['Horario']}</span>
+            </div>
             <div class="voluntarios-box">
-                <span><b>V1:</b> {v1 if v1 else "---"}</span>
-                <span><b>V2:</b> {v2 if v2 else "---"}</span>
+                <b>Voluntário 1:</b> {v1 if v1 else "---"}<br>
+                <b>Voluntário 2:</b> {v2 if v2 else "---"}
             </div>
         </div>
     """, unsafe_allow_html=True)
 
     ja_in = (v1.lower() == user['Nome'].lower() or v2.lower() == user['Nome'].lower())
-    if ja_in: st.button("✅ INSCRITO", key=f"bi_{i}", disabled=True, width="stretch")
+    if ja_in: st.button("✅ VOCÊ JÁ ESTÁ INSCRITO", key=f"bi_{i}", disabled=True, width="stretch")
     elif v1 and v2: st.button("🚫 SEM VAGAS", key=f"bf_{i}", disabled=True, width="stretch")
     else:
         if st.button("Quero me inscrever", key=f"bq_{i}", type="primary", width="stretch"):
