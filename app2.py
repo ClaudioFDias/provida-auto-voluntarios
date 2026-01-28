@@ -1,168 +1,817 @@
 import streamlit as st
+
 import gspread
+
 from oauth2client.service_account import ServiceAccountCredentials
+
 import pandas as pd
-from datetime import datetime
+
+from datetime import datetime, date
+
 import textwrap
+
 import re
 
+
+
 # --- 1. CONEXÃO ---
+
 @st.cache_resource
+
 def get_gspread_client():
+
     try:
+
         partes = [f"S{i}" for i in range(1, 22)]
+
         chave_full = "".join([re.sub(r'[^A-Za-z0-9+/=]', '', st.secrets[p]) for p in partes])
+
         key_lines = textwrap.wrap(chave_full, 64)
+
         formatted_key = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(key_lines) + "\n-----END PRIVATE KEY-----\n"
+
         creds_info = {
+
             "type": st.secrets["TYPE"], "project_id": st.secrets["PROJECT_ID"],
+
             "private_key_id": st.secrets["PRIVATE_KEY_ID"], "private_key": formatted_key,
+
             "client_email": st.secrets["CLIENT_EMAIL"], "client_id": st.secrets["CLIENT_ID"],
+
             "auth_uri": st.secrets["AUTH_URI"], "token_uri": st.secrets["TOKEN_URI"],
+
             "auth_provider_x509_cert_url": st.secrets["AUTH_PROVIDER_X509_CERT_URL"],
+
             "client_x509_cert_url": st.secrets["CLIENT_X509_CERT_URL"]
+
         }
+
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+
         return gspread.authorize(creds)
+
     except Exception:
+
         st.error("Erro de conexão."); st.stop()
 
+
+
 def load_data():
+
     client = get_gspread_client()
+
     ss = client.open_by_key("1paP1ZB2ufwCc95T_gdCR92kx-suXbROnDfbWMC_ka0c")
-    sheet = ss.worksheet("Calendario_Eventos")
-    df = pd.DataFrame(sheet.get_all_records())
-    df.columns = [col.strip() for col in df.columns]
-    return sheet, df
 
-# --- 2. MAPA DE NÍVEIS ---
-mapa_niveis = {
-    "Nenhum": 0, "BAS": 1, "AV1": 2, "IN": 3, "AV2": 4, "AV2-24": 4, 
-    "AV2-23": 5, "Av.2/": 6, "AV3": 7, "AV3A": 8, "AV3/": 9, "AV4": 10, "AV4A": 11
+    sheet_ev = ss.worksheet("Calendario_Eventos")
+
+    sheet_us = ss.worksheet("Usuarios") 
+
+    df_ev = pd.DataFrame(sheet_ev.get_all_records())
+
+    df_ev.columns = [c.strip() for c in df_ev.columns]
+
+    data_us = sheet_us.get_all_records()
+
+    df_us = pd.DataFrame(data_us) if data_us else pd.DataFrame(columns=['Email', 'Nome', 'Telefone', 'Departamentos', 'Nivel'])
+
+    df_us.columns = [c.strip() for c in df_us.columns]
+
+    return sheet_ev, sheet_us, df_ev, df_us
+
+
+
+# --- 2. CONFIGURAÇÕES ---
+
+cores_niveis = {
+
+    "Nenhum": "#FFFFFF", "BAS": "#C8E6C9", "AV1": "#FFCDD2", "IN": "#BBDEFB",
+
+    "AV2": "#795548", "AV2-24": "#795548", "AV2-23": "#795548", "AV2/": "#795548",
+
+    "AV3": "#E1BEE7", "AV3A": "#E1BEE7", "AV3/": "#E1BEE7", "AV4": "#FFF9C4", "AV4A": "#FFF9C4"
+
 }
-dias_semana = {0: "Seg", 1: "Ter", 2: "Qua", 3: "Qui", 4: "Sex", 5: "Sáb", 6: "Dom"}
 
-def definir_status(row):
-    v1 = str(row.get('Voluntário 1', '')).strip()
-    v2 = str(row.get('Voluntário 2', '')).strip()
-    if v1 == "" and v2 == "": return "🔴 2 Vagas"
-    if v1 == "" or v2 == "": return "🟡 1 Vaga"
-    return "🟢 Completo"
+mapa_niveis_num = {k: i for i, k in enumerate(cores_niveis.keys())}
 
-def aplicar_estilo_linha(row):
-    status = str(row.get('Status', ''))
-    if "2 Vagas" in status: bg_color = '#FFEBEE'
-    elif "1 Vaga" in status: bg_color = '#FFF9C4'
-    else: bg_color = '#FFFFFF'
-    return [f'background-color: {bg_color}; color: black'] * len(row)
+dias_semana = {"Monday": "Seg", "Tuesday": "Ter", "Wednesday": "Qua", "Thursday": "Qui", "Friday": "Sex", "Saturday": "Sáb", "Sunday": "Dom"}
 
-# --- 3. DIALOG ---
-@st.dialog("Confirmar")
-def confirmar_dialog(sheet, linha, row, vaga_n, col_idx, col_ev, col_hr):
-    data_f = row['Data_Dt'].strftime('%d/%m')
-    st.markdown(f"### {row[col_ev]}")
-    st.markdown(f"**📌 Info:** {row['Nível']} - {data_f} ({row['Dia_da_Semana']}) - {row[col_hr]}")
-    st.markdown(f"**👤 Vaga:** {vaga_n}")
-    if st.button("✅ Confirmar Inscrição", type="primary", width="stretch"):
-        with st.spinner("Salvando..."):
-            sheet.update_cell(linha, col_idx, st.session_state.nome_usuario)
-            st.cache_resource.clear()
-            st.rerun()
 
-# --- 4. LOGIN ---
-st.set_page_config(page_title="ProVida", layout="wide")
-st.markdown("<style>.stApp {background-color: white; color: black;} h1,h2,h3,p,label,div {color: black !important;}</style>", unsafe_allow_html=True)
 
-if 'autenticado' not in st.session_state: st.session_state.autenticado = False
+# --- 3. DIALOGS ---
 
-if not st.session_state.autenticado:
-    st.title("🔐 Login")
-    with st.form("login"):
-        n = st.text_input("Nome Completo")
-        niv = st.selectbox("Seu Nível", list(mapa_niveis.keys()))
-        if st.form_submit_button("Entrar"):
-            if n: 
-                st.session_state.update({"nome_usuario": n, "nivel_num": mapa_niveis[niv], "autenticado": True})
-                st.rerun()
+@st.dialog("Confirmar Alteração de Cadastro")
+
+def confirmar_edicao_dialog(sheet, linha, novos_dados):
+
+    st.markdown("### Verifique seus novos dados:")
+
+    st.markdown(f"- **Nome:** {novos_dados[1]}\n- **Telefone:** {novos_dados[2]}\n- **Nível:** {novos_dados[4]}\n- **Departamentos:** {novos_dados[3]}")
+
+    if st.button("Confirmar e Salvar", type="primary", width="stretch"):
+
+        sheet.update(f"A{linha}:E{linha}", [novos_dados])
+
+        st.session_state.user = {"Email": novos_dados[0], "Nome": novos_dados[1], "Telefone": novos_dados[2], "Departamentos": novos_dados[3], "Nivel": novos_dados[4]}
+
+        st.session_state.modo_edicao = False
+
+        st.cache_resource.clear(); st.success("Perfil atualizado!"); st.rerun()
+
+
+
+@st.dialog("Confirmar Inscrição")
+
+def confirmar_dialog(sheet, linha, row, vaga_n, col_idx):
+
+    dia_pt = dias_semana.get(row['Data_Dt'].strftime('%A'), "")
+
+    st.markdown(f"### {row['Nível']} - {row['Nome do Evento']}")
+
+    st.write(f"📅 **Data:** {dia_pt} - {row['Data_Dt'].strftime('%d/%m/%Y')}")
+
+    st.write(f"⏰ **Horário:** {row['Horario']}")
+
+    st.divider()
+
+    if st.button("Confirmar Inscrição", type="primary", width="stretch"):
+
+        sheet.update_cell(linha, col_idx, st.session_state.user['Nome'])
+
+        st.cache_resource.clear(); st.rerun()
+
+
+
+# --- 4. STYLE ---
+
+st.set_page_config(page_title="ProVida Escala", layout="centered")
+
+st.markdown("""
+
+    <style>
+
+    html, body, [class*="st-at"], .stMarkdown p { font-size: 1.1rem !important; }
+
+    .card-container { padding: 15px; border-radius: 12px 12px 0 0; border: 1px solid #ddd; margin-top: 15px; }
+
+    .card-header { display: flex; justify-content: space-between; align-items: center; font-weight: 800; }
+
+    .card-title { margin: 8px 0; font-size: 1.45em; line-height: 1.2; }
+
+    .voluntarios-box { background: rgba(0,0,0,0.07); padding: 10px; border-radius: 8px; font-size: 1rem; }
+
+    </style>
+
+""", unsafe_allow_html=True)
+
+
+
+if 'user' not in st.session_state: st.session_state.user = None
+
+if 'modo_edicao' not in st.session_state: st.session_state.modo_edicao = False
+
+
+
+sheet_ev, sheet_us, df_ev, df_us = load_data()
+
+deps_na_planilha = sorted([d for d in df_ev['Departamento'].unique() if str(d).strip() != ""])
+
+
+
+# --- 5. ACESSO / LOGIN / EDIÇÃO ---
+
+if st.session_state.user is None:
+
+    st.title("🤝 Escala de Voluntários")
+
+    if st.session_state.modo_edicao:
+
+        st.subheader("📝 Alterar Meus Dados")
+
+        with st.form("busca_edicao"):
+
+            email_b = st.text_input("E-mail cadastrado:").strip().lower()
+
+            if st.form_submit_button("Buscar Cadastro", type="primary", width="stretch"):
+
+                user_row = df_us[df_us['Email'].astype(str).str.lower() == email_b]
+
+                if not user_row.empty: 
+
+                    st.session_state['edit_row'] = user_row.iloc[0].to_dict()
+
+                    st.session_state['edit_idx'] = user_row.index[0] + 2
+
+                else: st.error("E-mail não encontrado.")
+
+        if 'edit_row' in st.session_state:
+
+            with st.form("edicao_final"):
+
+                dados = st.session_state['edit_row']
+
+                n_e = st.text_input("Nome Crachá:", value=dados['Nome'])
+
+                t_e = st.text_input("Telefone:", value=dados['Telefone'])
+
+                deps_usuario_lista = [d.strip() for d in str(dados['Departamentos']).split(",") if d.strip() != ""]
+
+                default_deps = [d for d in deps_usuario_lista if d in deps_na_planilha]
+
+                d_e = st.multiselect("Seus Departamentos:", options=deps_na_planilha, default=default_deps)
+
+                niv_l = list(cores_niveis.keys())
+
+                niv_e = st.selectbox("Nível:", niv_l, index=niv_l.index(dados['Nivel']) if dados['Nivel'] in niv_l else 0)
+
+                if st.form_submit_button("Revisar Alterações", type="primary", width="stretch"):
+
+                    confirmar_edicao_dialog(sheet_us, st.session_state['edit_idx'], [dados['Email'], n_e, t_e, ",".join(d_e), niv_e])
+
+        if st.button("Voltar"): 
+
+            st.session_state.modo_edicao = False; st.rerun()
+
+    else:
+
+        with st.form("login"):
+
+            em = st.text_input("E-mail para entrar:").strip().lower()
+
+            if st.form_submit_button("Entrar no Sistema", type="primary", width="stretch"):
+
+                u = df_us[df_us['Email'].astype(str).str.lower() == em]
+
+                if not u.empty: st.session_state.user = u.iloc[0].to_dict(); st.rerun()
+
+                else: st.session_state['novo_em'] = em
+
+        if 'novo_em' in st.session_state:
+
+            with st.form("cad"):
+
+                nc = st.text_input("Nome Crachá:"); tc = st.text_input("Telefone:")
+
+                dc = st.multiselect("Departamentos:", options=deps_na_planilha)
+
+                nv = st.selectbox("Nível:", list(cores_niveis.keys()))
+
+                if st.form_submit_button("Cadastrar"):
+
+                    sheet_us.append_row([st.session_state['novo_em'], nc, tc, ",".join(dc), nv])
+
+                    st.session_state.user = {"Email": st.session_state['novo_em'], "Nome": nc, "Telefone": tc, "Departamentos": ",".join(dc), "Nivel": nv}
+
+                    st.cache_resource.clear(); st.rerun()
+
+        st.divider()
+
+        if st.button("⚙️ Alterar Meus Dados"): st.session_state.modo_edicao = True; st.rerun()
+
     st.stop()
 
-# --- 5. DATA E PROCESSAMENTO ---
-try:
-    sheet, df = load_data()
+
+
+# --- 6. DASHBOARD ---
+
+user = st.session_state.user
+
+meus_deps = [d.strip() for d in str(user['Departamentos']).split(",") if d.strip() != ""]
+
+st.title(f"🤝 Olá, {user['Nome'].split()[0]}!")
+
+
+
+if not meus_deps:
+
+    st.warning("⚠️ Perfil sem departamentos.")
+
+    if st.button("Sair"): st.session_state.user = None; st.rerun()
+
+    st.stop()
+
+
+
+filtro_status = st.pills("Status:", ["Vagas Abertas", "Minhas Inscrições", "Tudo"], default="Vagas Abertas")
+
+f_depto_pill = st.pills("Departamento:", ["Todos"] + meus_deps, default="Todos")
+
+f_data = st.date_input("A partir de:", value=date.today())
+
+
+
+# Processamento
+
+df_ev['Data_Dt'] = pd.to_datetime(df_ev['Data Específica'], errors='coerce', dayfirst=True)
+
+df_ev['Niv_N'] = df_ev['Nível'].astype(str).str.strip().map(mapa_niveis_num).fillna(99)
+
+df_ev = df_ev.sort_values(by=['Data_Dt', 'Horario']).reset_index(drop=False)
+
+
+
+df_f = df_ev[df_ev['Departamento'].isin(meus_deps)].copy()
+
+df_f = df_f[(df_f['Niv_N'] <= mapa_niveis_num.get(user['Nivel'], 0)) & (df_f['Data_Dt'].dt.date >= f_data)]
+
+if f_depto_pill != "Todos": df_f = df_f[df_f['Departamento'] == f_depto_pill]
+
+
+
+if filtro_status == "Minhas Inscrições":
+
+    df_f = df_f[(df_f['Voluntário 1'].astype(str).str.lower() == user['Nome'].lower()) | (df_f['Voluntário 2'].astype(str).str.lower() == user['Nome'].lower())]
+
+elif filtro_status == "Vagas Abertas":
+
+    df_f = df_f[df_f.apply(lambda x: str(x['Voluntário 1']).strip() == "" or str(x['Voluntário 2']).strip() == "", axis=1)]
+
+
+
+# Renderização
+
+for i, row in df_f.iterrows():
+
+    v1, v2 = str(row['Voluntário 1']).strip(), str(row['Voluntário 2']).strip()
+
+    bg = cores_niveis.get(str(row['Nível']).strip(), "#FFFFFF")
+
+    tx = "#FFFFFF" if "AV2" in str(row['Nível']) else "#000000"
+
+    st_vaga = "🟢 Cheio" if v1 and v2 else ("🟡 1 Vaga" if v1 or v2 else "🔴 2 Vagas")
+
     
-    # Identifica colunas dinamicamente (com ou sem acento)
-    col_ev = next((c for c in df.columns if 'Evento' in c), 'Evento')
-    col_hr = next((c for c in df.columns if c.lower() in ['horário', 'horario', 'hora']), None)
-    
-    if not col_hr:
-        df['Horario'] = "---"
-        col_hr = 'Horario'
-    
-    # Processamento de Datas
-    df['Data_Dt'] = pd.to_datetime(df['Data Específica'], errors='coerce', dayfirst=True)
-    df['Dia_da_Semana'] = df['Data_Dt'].dt.weekday.map(dias_semana)
-    df['Niv_N'] = df['Nível'].astype(str).str.strip().map(mapa_niveis).fillna(99)
-    df['Status'] = df.apply(definir_status, axis=1)
 
-    # Ordenação
-    df = df.sort_values(by=['Data_Dt', col_hr]).reset_index(drop=False)
+    st.markdown(f"""
 
-    st.title(f"🤝 Olá, {st.session_state.nome_usuario.split()[0]}")
+        <div class="card-container" style="background-color: {bg}; color: {tx};">
 
-    with st.sidebar:
-        f_dat = st.date_input("Filtrar Data", datetime.now().date())
-        so_vagas = st.checkbox("Ver apenas vagas", value=False)
-        if st.button("Sair"): 
-            st.session_state.autenticado = False
-            st.rerun()
+            <div class="card-header"><span>{st_vaga}</span><span>{row['Data_Dt'].strftime('%d/%m')}</span></div>
 
-    # FILTRAGEM (Garante que df_f existe para as seções seguintes)
-    df_f = df[(df['Niv_N'] <= st.session_state.nivel_num) & (df['Data_Dt'].dt.date >= f_dat)].copy()
-    if so_vagas: 
-        df_f = df_f[df_f['Status'] != "🟢 Completo"]
+            <h2 class="card-title" style="color: {tx};">{row['Nível']} - {row['Nome do Evento']}</h2>
 
-    # --- 6. INSCRIÇÃO RÁPIDA ---
-    st.subheader("📝 Inscrição Rápida")
-    v_l = df_f[df_f['Status'] != "🟢 Completo"].copy()
-    if not v_l.empty:
-        v_l['label'] = v_l.apply(lambda x: f"{x['Nível']} | {x['Data_Dt'].strftime('%d/%m')} - {x[col_hr]} | {x[col_ev][:10]}..", axis=1)
-        esc = st.selectbox("Escolha a atividade:", v_l['label'].tolist(), index=None, placeholder="Selecione...")
-        if esc:
-            idx_vagas = v_l[v_l['label'] == esc].index[0]
-            if st.button("Inscrever-se", type="primary", width="stretch"):
-                linha_p = int(v_l.loc[idx_vagas, 'index']) + 2
-                # Aqui usamos colunas 7 e 8 fixas conforme sua estrutura de Voluntários
-                val_v1 = str(sheet.cell(linha_p, 7).value).strip()
-                confirmar_dialog(sheet, linha_p, v_l.loc[idx_vagas], ("V1" if val_v1 == "" else "V2"), (7 if val_v1 == "" else 8), col_ev, col_hr)
-    
-    # --- 7. ESCALA (TABELA) ---
+            <div style="font-weight: 800; margin-bottom: 10px;">🏢 {row['Departamento']} | ⏰ {row['Horario']}</div>
+
+            <div class="voluntarios-box"><b>V1:</b> {v1 if v1 else "---"} | <b>V2:</b> {v2 if v2 else "---"}</div>
+
+        </div>
+
+    """, unsafe_allow_html=True)
+
+
+
+    ja_in = (v1.lower() == user['Nome'].lower() or v2.lower() == user['Nome'].lower())
+
+    if ja_in: st.button("✅ INSCRITO", key=f"bi_{i}", disabled=True, width="stretch")
+
+    elif v1 and v2: st.button("🚫 CHEIO", key=f"bf_{i}", disabled=True, width="stretch")
+
+    else:
+
+        if st.button("Quero me inscrever", key=f"bq_{i}", type="primary", width="stretch"):
+
+            # --- NOVA TRAVA DE CONFLITO ---
+
+            nome_u = user['Nome'].lower()
+
+            conflito = df_ev[
+
+                (df_ev['Data Específica'] == row['Data Específica']) & 
+
+                (df_ev['Horario'] == row['Horario']) & 
+
+                ((df_ev['Voluntário 1'].astype(str).str.lower() == nome_u) | 
+
+                 (df_ev['Voluntário 2'].astype(str).str.lower() == nome_u))
+
+            ]
+
+            
+
+            if not conflito.empty:
+
+                evento_c = conflito.iloc[0]['Nome do Evento']
+
+                st.error(f"⚠️ **Conflito de Horário!** Você já está inscrito em '{evento_c}' neste mesmo dia e horário.")
+
+            else:
+
+                v_alvo, c_alvo = ("Voluntário 1", 8) if v1 == "" else ("Voluntário 2", 9)
+
+                confirmar_dialog(sheet_ev, int(row['index'])+2, row, v_alvo, c_alvo)
+
+
+
+st.divider()
+
+if st.button("Sair"): st.session_state.user = None; st.rerun()import streamlit as st
+
+import gspread
+
+from oauth2client.service_account import ServiceAccountCredentials
+
+import pandas as pd
+
+from datetime import datetime, date
+
+import textwrap
+
+import re
+
+
+
+# --- 1. CONEXÃO ---
+
+@st.cache_resource
+
+def get_gspread_client():
+
+    try:
+
+        partes = [f"S{i}" for i in range(1, 22)]
+
+        chave_full = "".join([re.sub(r'[^A-Za-z0-9+/=]', '', st.secrets[p]) for p in partes])
+
+        key_lines = textwrap.wrap(chave_full, 64)
+
+        formatted_key = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(key_lines) + "\n-----END PRIVATE KEY-----\n"
+
+        creds_info = {
+
+            "type": st.secrets["TYPE"], "project_id": st.secrets["PROJECT_ID"],
+
+            "private_key_id": st.secrets["PRIVATE_KEY_ID"], "private_key": formatted_key,
+
+            "client_email": st.secrets["CLIENT_EMAIL"], "client_id": st.secrets["CLIENT_ID"],
+
+            "auth_uri": st.secrets["AUTH_URI"], "token_uri": st.secrets["TOKEN_URI"],
+
+            "auth_provider_x509_cert_url": st.secrets["AUTH_PROVIDER_X509_CERT_URL"],
+
+            "client_x509_cert_url": st.secrets["CLIENT_X509_CERT_URL"]
+
+        }
+
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+
+        return gspread.authorize(creds)
+
+    except Exception:
+
+        st.error("Erro de conexão."); st.stop()
+
+
+
+def load_data():
+
+    client = get_gspread_client()
+
+    ss = client.open_by_key("1paP1ZB2ufwCc95T_gdCR92kx-suXbROnDfbWMC_ka0c")
+
+    sheet_ev = ss.worksheet("Calendario_Eventos")
+
+    sheet_us = ss.worksheet("Usuarios") 
+
+    df_ev = pd.DataFrame(sheet_ev.get_all_records())
+
+    df_ev.columns = [c.strip() for c in df_ev.columns]
+
+    data_us = sheet_us.get_all_records()
+
+    df_us = pd.DataFrame(data_us) if data_us else pd.DataFrame(columns=['Email', 'Nome', 'Telefone', 'Departamentos', 'Nivel'])
+
+    df_us.columns = [c.strip() for c in df_us.columns]
+
+    return sheet_ev, sheet_us, df_ev, df_us
+
+
+
+# --- 2. CONFIGURAÇÕES ---
+
+cores_niveis = {
+
+    "Nenhum": "#FFFFFF", "BAS": "#C8E6C9", "AV1": "#FFCDD2", "IN": "#BBDEFB",
+
+    "AV2": "#795548", "AV2-24": "#795548", "AV2-23": "#795548", "AV2/": "#795548",
+
+    "AV3": "#E1BEE7", "AV3A": "#E1BEE7", "AV3/": "#E1BEE7", "AV4": "#FFF9C4", "AV4A": "#FFF9C4"
+
+}
+
+mapa_niveis_num = {k: i for i, k in enumerate(cores_niveis.keys())}
+
+dias_semana = {"Monday": "Seg", "Tuesday": "Ter", "Wednesday": "Qua", "Thursday": "Qui", "Friday": "Sex", "Saturday": "Sáb", "Sunday": "Dom"}
+
+
+
+# --- 3. DIALOGS ---
+
+@st.dialog("Confirmar Alteração de Cadastro")
+
+def confirmar_edicao_dialog(sheet, linha, novos_dados):
+
+    st.markdown("### Verifique seus novos dados:")
+
+    st.markdown(f"- **Nome:** {novos_dados[1]}\n- **Telefone:** {novos_dados[2]}\n- **Nível:** {novos_dados[4]}\n- **Departamentos:** {novos_dados[3]}")
+
+    if st.button("Confirmar e Salvar", type="primary", width="stretch"):
+
+        sheet.update(f"A{linha}:E{linha}", [novos_dados])
+
+        st.session_state.user = {"Email": novos_dados[0], "Nome": novos_dados[1], "Telefone": novos_dados[2], "Departamentos": novos_dados[3], "Nivel": novos_dados[4]}
+
+        st.session_state.modo_edicao = False
+
+        st.cache_resource.clear(); st.success("Perfil atualizado!"); st.rerun()
+
+
+
+@st.dialog("Confirmar Inscrição")
+
+def confirmar_dialog(sheet, linha, row, vaga_n, col_idx):
+
+    dia_pt = dias_semana.get(row['Data_Dt'].strftime('%A'), "")
+
+    st.markdown(f"### {row['Nível']} - {row['Nome do Evento']}")
+
+    st.write(f"📅 **Data:** {dia_pt} - {row['Data_Dt'].strftime('%d/%m/%Y')}")
+
+    st.write(f"⏰ **Horário:** {row['Horario']}")
+
     st.divider()
-    st.subheader("📋 Escala")
+
+    if st.button("Confirmar Inscrição", type="primary", width="stretch"):
+
+        sheet.update_cell(linha, col_idx, st.session_state.user['Nome'])
+
+        st.cache_resource.clear(); st.rerun()
+
+
+
+# --- 4. STYLE ---
+
+st.set_page_config(page_title="ProVida Escala", layout="centered")
+
+st.markdown("""
+
+    <style>
+
+    html, body, [class*="st-at"], .stMarkdown p { font-size: 1.1rem !important; }
+
+    .card-container { padding: 15px; border-radius: 12px 12px 0 0; border: 1px solid #ddd; margin-top: 15px; }
+
+    .card-header { display: flex; justify-content: space-between; align-items: center; font-weight: 800; }
+
+    .card-title { margin: 8px 0; font-size: 1.45em; line-height: 1.2; }
+
+    .voluntarios-box { background: rgba(0,0,0,0.07); padding: 10px; border-radius: 8px; font-size: 1rem; }
+
+    </style>
+
+""", unsafe_allow_html=True)
+
+
+
+if 'user' not in st.session_state: st.session_state.user = None
+
+if 'modo_edicao' not in st.session_state: st.session_state.modo_edicao = False
+
+
+
+sheet_ev, sheet_us, df_ev, df_us = load_data()
+
+deps_na_planilha = sorted([d for d in df_ev['Departamento'].unique() if str(d).strip() != ""])
+
+
+
+# --- 5. ACESSO / LOGIN / EDIÇÃO ---
+
+if st.session_state.user is None:
+
+    st.title("🤝 Escala de Voluntários")
+
+    if st.session_state.modo_edicao:
+
+        st.subheader("📝 Alterar Meus Dados")
+
+        with st.form("busca_edicao"):
+
+            email_b = st.text_input("E-mail cadastrado:").strip().lower()
+
+            if st.form_submit_button("Buscar Cadastro", type="primary", width="stretch"):
+
+                user_row = df_us[df_us['Email'].astype(str).str.lower() == email_b]
+
+                if not user_row.empty: 
+
+                    st.session_state['edit_row'] = user_row.iloc[0].to_dict()
+
+                    st.session_state['edit_idx'] = user_row.index[0] + 2
+
+                else: st.error("E-mail não encontrado.")
+
+        if 'edit_row' in st.session_state:
+
+            with st.form("edicao_final"):
+
+                dados = st.session_state['edit_row']
+
+                n_e = st.text_input("Nome Crachá:", value=dados['Nome'])
+
+                t_e = st.text_input("Telefone:", value=dados['Telefone'])
+
+                deps_usuario_lista = [d.strip() for d in str(dados['Departamentos']).split(",") if d.strip() != ""]
+
+                default_deps = [d for d in deps_usuario_lista if d in deps_na_planilha]
+
+                d_e = st.multiselect("Seus Departamentos:", options=deps_na_planilha, default=default_deps)
+
+                niv_l = list(cores_niveis.keys())
+
+                niv_e = st.selectbox("Nível:", niv_l, index=niv_l.index(dados['Nivel']) if dados['Nivel'] in niv_l else 0)
+
+                if st.form_submit_button("Revisar Alterações", type="primary", width="stretch"):
+
+                    confirmar_edicao_dialog(sheet_us, st.session_state['edit_idx'], [dados['Email'], n_e, t_e, ",".join(d_e), niv_e])
+
+        if st.button("Voltar"): 
+
+            st.session_state.modo_edicao = False; st.rerun()
+
+    else:
+
+        with st.form("login"):
+
+            em = st.text_input("E-mail para entrar:").strip().lower()
+
+            if st.form_submit_button("Entrar no Sistema", type="primary", width="stretch"):
+
+                u = df_us[df_us['Email'].astype(str).str.lower() == em]
+
+                if not u.empty: st.session_state.user = u.iloc[0].to_dict(); st.rerun()
+
+                else: st.session_state['novo_em'] = em
+
+        if 'novo_em' in st.session_state:
+
+            with st.form("cad"):
+
+                nc = st.text_input("Nome Crachá:"); tc = st.text_input("Telefone:")
+
+                dc = st.multiselect("Departamentos:", options=deps_na_planilha)
+
+                nv = st.selectbox("Nível:", list(cores_niveis.keys()))
+
+                if st.form_submit_button("Cadastrar"):
+
+                    sheet_us.append_row([st.session_state['novo_em'], nc, tc, ",".join(dc), nv])
+
+                    st.session_state.user = {"Email": st.session_state['novo_em'], "Nome": nc, "Telefone": tc, "Departamentos": ",".join(dc), "Nivel": nv}
+
+                    st.cache_resource.clear(); st.rerun()
+
+        st.divider()
+
+        if st.button("⚙️ Alterar Meus Dados"): st.session_state.modo_edicao = True; st.rerun()
+
+    st.stop()
+
+
+
+# --- 6. DASHBOARD ---
+
+user = st.session_state.user
+
+meus_deps = [d.strip() for d in str(user['Departamentos']).split(",") if d.strip() != ""]
+
+st.title(f"🤝 Olá, {user['Nome'].split()[0]}!")
+
+
+
+if not meus_deps:
+
+    st.warning("⚠️ Perfil sem departamentos.")
+
+    if st.button("Sair"): st.session_state.user = None; st.rerun()
+
+    st.stop()
+
+
+
+filtro_status = st.pills("Status:", ["Vagas Abertas", "Minhas Inscrições", "Tudo"], default="Vagas Abertas")
+
+f_depto_pill = st.pills("Departamento:", ["Todos"] + meus_deps, default="Todos")
+
+f_data = st.date_input("A partir de:", value=date.today())
+
+
+
+# Processamento
+
+df_ev['Data_Dt'] = pd.to_datetime(df_ev['Data Específica'], errors='coerce', dayfirst=True)
+
+df_ev['Niv_N'] = df_ev['Nível'].astype(str).str.strip().map(mapa_niveis_num).fillna(99)
+
+df_ev = df_ev.sort_values(by=['Data_Dt', 'Horario']).reset_index(drop=False)
+
+
+
+df_f = df_ev[df_ev['Departamento'].isin(meus_deps)].copy()
+
+df_f = df_f[(df_f['Niv_N'] <= mapa_niveis_num.get(user['Nivel'], 0)) & (df_f['Data_Dt'].dt.date >= f_data)]
+
+if f_depto_pill != "Todos": df_f = df_f[df_f['Departamento'] == f_depto_pill]
+
+
+
+if filtro_status == "Minhas Inscrições":
+
+    df_f = df_f[(df_f['Voluntário 1'].astype(str).str.lower() == user['Nome'].lower()) | (df_f['Voluntário 2'].astype(str).str.lower() == user['Nome'].lower())]
+
+elif filtro_status == "Vagas Abertas":
+
+    df_f = df_f[df_f.apply(lambda x: str(x['Voluntário 1']).strip() == "" or str(x['Voluntário 2']).strip() == "", axis=1)]
+
+
+
+# Renderização
+
+for i, row in df_f.iterrows():
+
+    v1, v2 = str(row['Voluntário 1']).strip(), str(row['Voluntário 2']).strip()
+
+    bg = cores_niveis.get(str(row['Nível']).strip(), "#FFFFFF")
+
+    tx = "#FFFFFF" if "AV2" in str(row['Nível']) else "#000000"
+
+    st_vaga = "🟢 Cheio" if v1 and v2 else ("🟡 1 Vaga" if v1 or v2 else "🔴 2 Vagas")
+
     
-    df_show = df_f.copy()
-    df_show['Info (Nív-Data-Hora)'] = df_show.apply(
-        lambda x: f"{x['Nível']} - {x['Data_Dt'].strftime('%d/%m')} ({x['Dia_da_Semana']}) - {x[col_hr]}", axis=1
-    )
-    df_show = df_show.rename(columns={col_ev: 'Evento', 'Voluntário 1': 'V1', 'Voluntário 2': 'V2'})
-    
-    cols_display = ['Status', 'Info (Nív-Data-Hora)', 'Evento', 'V1', 'V2']
 
-    sel = st.dataframe(
-        df_show[cols_display].style.apply(aplicar_estilo_linha, axis=1), 
-        width="stretch", 
-        hide_index=True, 
-        on_select="rerun", 
-        selection_mode="single-row"
-    )
+    st.markdown(f"""
 
-    if sel.selection.rows:
-        r_idx = sel.selection.rows[0]
-        r_sel = df_f.iloc[r_idx]
-        if "Completo" not in r_sel['Status']:
-            linha_orig = int(r_sel['index']) + 2
-            v1_a = str(r_sel['Voluntário 1']).strip()
-            confirmar_dialog(sheet, linha_orig, r_sel, ("V1" if v1_a == "" else "V2"), (7 if v1_a == "" else 8), col_ev, col_hr)
+        <div class="card-container" style="background-color: {bg}; color: {tx};">
 
-except Exception as e:
-    st.error(f"Erro no processamento: {e}")
+            <div class="card-header"><span>{st_vaga}</span><span>{row['Data_Dt'].strftime('%d/%m')}</span></div>
+
+            <h2 class="card-title" style="color: {tx};">{row['Nível']} - {row['Nome do Evento']}</h2>
+
+            <div style="font-weight: 800; margin-bottom: 10px;">🏢 {row['Departamento']} | ⏰ {row['Horario']}</div>
+
+            <div class="voluntarios-box"><b>V1:</b> {v1 if v1 else "---"} | <b>V2:</b> {v2 if v2 else "---"}</div>
+
+        </div>
+
+    """, unsafe_allow_html=True)
+
+
+
+    ja_in = (v1.lower() == user['Nome'].lower() or v2.lower() == user['Nome'].lower())
+
+    if ja_in: st.button("✅ INSCRITO", key=f"bi_{i}", disabled=True, width="stretch")
+
+    elif v1 and v2: st.button("🚫 CHEIO", key=f"bf_{i}", disabled=True, width="stretch")
+
+    else:
+
+        if st.button("Quero me inscrever", key=f"bq_{i}", type="primary", width="stretch"):
+
+            # --- NOVA TRAVA DE CONFLITO ---
+
+            nome_u = user['Nome'].lower()
+
+            conflito = df_ev[
+
+                (df_ev['Data Específica'] == row['Data Específica']) & 
+
+                (df_ev['Horario'] == row['Horario']) & 
+
+                ((df_ev['Voluntário 1'].astype(str).str.lower() == nome_u) | 
+
+                 (df_ev['Voluntário 2'].astype(str).str.lower() == nome_u))
+
+            ]
+
+            
+
+            if not conflito.empty:
+
+                evento_c = conflito.iloc[0]['Nome do Evento']
+
+                st.error(f"⚠️ **Conflito de Horário!** Você já está inscrito em '{evento_c}' neste mesmo dia e horário.")
+
+            else:
+
+                v_alvo, c_alvo = ("Voluntário 1", 8) if v1 == "" else ("Voluntário 2", 9)
+
+                confirmar_dialog(sheet_ev, int(row['index'])+2, row, v_alvo, c_alvo)
+
+
+
+st.divider()
+
+if st.button("Sair"): st.session_state.user = None; st.rerun()
