@@ -63,31 +63,50 @@ def confirmar_edicao_dialog(sheet, linha, novos_dados):
 
 @st.dialog("Confirmar Inscrição")
 def confirmar_dialog(sheet, linha, row, vaga_n, col_idx):
-    st.markdown(f"### {row['Nome do Evento']}")
-    st.write(f"📅 **Data:** {row['Data_Dt'].strftime('%d/%m')}")
-    st.write(f"👤 **Vaga:** {vaga_n}")
-    if st.button("Confirmar", type="primary", width="stretch"):
+    st.markdown(f"### {row['Nível']} - {row['Nome do Evento']}")
+    st.divider()
+    st.write(f"📅 **Data:** {row['Data_Dt'].strftime('%d/%m/%Y')}")
+    st.write(f"⏰ **Horário:** {row['Horario']}")
+    st.write(f"🏢 **Departamento:** {row['Departamento']}")
+    st.write(f"👤 **Sua Vaga:** {vaga_n}")
+    st.divider()
+    if st.button("Confirmar Inscrição", type="primary", width="stretch"):
         sheet.update_cell(linha, col_idx, st.session_state.user['Nome'])
         st.cache_resource.clear(); st.rerun()
 
-# --- 4. STYLE (Fontes maiores e Botão) ---
+# --- 4. STYLE ---
 st.set_page_config(page_title="ProVida Escala", layout="centered")
 
 st.markdown("""
     <style>
-    html, body, [class*="st-at"] {
-        font-size: 1.1rem !important;
+    /* Fonte geral aumentada */
+    html, body, [class*="st-at"], .stMarkdown p {
+        font-size: 1.2rem !important;
     }
+    
+    /* Títulos de Filtros e Labels */
+    .stSelectbox label, .stMultiSelect label, .stDateInput label, div[data-baseweb="pill-button"] {
+        font-size: 1.3rem !important;
+        font-weight: bold !important;
+    }
+
+    /* Botão de Entrar e botões principais maiores */
+    div.stButton > button:first-child[kind="primary"] {
+        font-size: 1.5rem !important;
+        height: 4.5rem !important;
+    }
+
+    /* Ajuste para as Pills (filtros clicáveis) ficarem maiores */
+    button[data-baseweb="pill-button"] {
+        padding: 10px 20px !important;
+        height: auto !important;
+    }
+    
     .stButton > button:disabled {
         background-color: #333333 !important;
         color: white !important;
         opacity: 1 !important;
         border: 1px solid #111 !important;
-    }
-    /* Botão de Entrar maior */
-    div.stButton > button:first-child[kind="primary"] {
-        font-size: 1.5rem !important;
-        height: 4rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -155,14 +174,15 @@ user = st.session_state.user
 st.title(f"🤝 Olá, {user['Nome'].split()[0]}!")
 
 # Filtros Padrão: Vagas Abertas
+st.markdown("### 🔍 Filtrar Vagas")
 filtro_status = st.pills("Status da Vaga:", ["Vagas Abertas", "Minhas Inscrições", "Tudo"], default="Vagas Abertas")
 
-# Departamentos como Pills clicáveis
-st.markdown("**Departamentos:**")
-f_depto_pill = st.pills("Selecione um departamento:", ["Todos"] + lista_deps_fixa, default="Todos")
+# Departamentos como Pills
+st.markdown("### 🏢 Departamentos")
+f_depto_pill = st.pills("Selecione para filtrar:", ["Todos"] + lista_deps_fixa, default="Todos")
 
-# Mais Opções
-with st.expander("📅 Outros Filtros"):
+# Opções de data e nível
+with st.expander("📅 Outros Filtros (Data e Nível)"):
     c1, c2 = st.columns(2)
     f_data = c1.date_input("A partir de:", datetime.now().date())
     f_nivel = c2.multiselect("Nível específico:", sorted(df_ev['Nível'].unique().tolist()))
@@ -174,10 +194,7 @@ nivel_user_num = mapa_niveis_num.get(user['Nivel'], 0)
 df_ev = df_ev.sort_values(by=['Data_Dt', 'Horario']).reset_index(drop=False)
 
 # Filtro de Departamento
-if f_depto_pill == "Todos":
-    dept_selecionados = lista_deps_fixa
-else:
-    dept_selecionados = [f_depto_pill]
+dept_selecionados = lista_deps_fixa if f_depto_pill == "Todos" else [f_depto_pill]
 
 df_f = df_ev[(df_ev['Departamento'].isin(dept_selecionados)) & (df_ev['Niv_N'] <= nivel_user_num) & (df_ev['Data_Dt'].dt.date >= f_data)].copy()
 if f_nivel: df_f = df_f[df_f['Nível'].isin(f_nivel)]
@@ -188,7 +205,7 @@ if filtro_status == "Minhas Inscrições":
 elif filtro_status == "Vagas Abertas":
     df_f = df_f[df_f.apply(lambda x: str(x['Voluntário 1']).strip() == "" or str(x['Voluntário 2']).strip() == "", axis=1)]
 
-st.subheader(f"📋 Atividades: {len(df_f)}")
+st.subheader(f"📋 Atividades Encontradas: {len(df_f)}")
 
 for i, row in df_f.iterrows():
     v1, v2 = str(row['Voluntário 1']).strip(), str(row['Voluntário 2']).strip()
@@ -198,15 +215,15 @@ for i, row in df_f.iterrows():
     ja_in = (v1.lower() == user['Nome'].lower() or v2.lower() == user['Nome'].lower())
 
     st.markdown(f"""
-        <div style="background-color: {bg}; padding: 18px; border-radius: 12px 12px 0 0; border: 1px solid #ddd; color: {tx}; margin-top: 20px;">
+        <div style="background-color: {bg}; padding: 20px; border-radius: 15px 15px 0 0; border: 1px solid #ddd; color: {tx}; margin-top: 25px;">
             <div style="display: flex; justify-content: space-between; font-weight: 800;">
-                <span style="font-size: 1em;">{st_vaga}</span>
-                <span style="font-size: 1.8em;">{row['Data_Dt'].strftime('%d/%m')}</span>
+                <span style="font-size: 1.1em;">{st_vaga}</span>
+                <span style="font-size: 2em;">{row['Data_Dt'].strftime('%d/%m')}</span>
             </div>
-            <h2 style="margin: 10px 0; color: {tx}; border: none; font-size: 1.5em;">{row['Nível']} - {row['Nome do Evento']}</h2>
-            <div style="font-weight: 700; margin-bottom: 5px;">🏢 {row['Departamento']}</div>
-            <div style="margin-bottom: 10px;"><b>Horário:</b> {row['Horario']}</div>
-            <div style="background: rgba(0,0,0,0.1); padding: 10px; border-radius: 8px;">
+            <h2 style="margin: 12px 0; color: {tx}; border: none; font-size: 1.6em;">{row['Nível']} - {row['Nome do Evento']}</h2>
+            <div style="font-weight: 700; margin-bottom: 8px; font-size: 1.2rem;">🏢 {row['Departamento']}</div>
+            <div style="margin-bottom: 12px; font-size: 1.1rem;"><b>Horário:</b> {row['Horario']}</div>
+            <div style="background: rgba(0,0,0,0.1); padding: 12px; border-radius: 10px;">
                 <b>Voluntário 1:</b> {v1 if v1 else "---"}<br>
                 <b>Voluntário 2:</b> {v2 if v2 else "---"}
             </div>
