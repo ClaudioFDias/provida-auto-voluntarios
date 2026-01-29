@@ -159,7 +159,8 @@ if not meus_deps:
     if st.button("Sair"): st.session_state.user = None; st.rerun()
     st.stop()
 
-filtro_status = st.pills("Status:", ["Vagas Abertas", "Minhas Inscrições", "Tudo"], default="Vagas Abertas")
+# ATUALIZAÇÃO DO FILTRO DE STATUS
+filtro_status = st.pills("Status:", ["Vagas Abertas", "Vagas Vazias", "Minhas Inscrições", "Tudo"], default="Vagas Abertas")
 f_depto_pill = st.pills("Departamento:", ["Todos"] + meus_deps, default="Todos")
 
 c1, c2 = st.columns(2)
@@ -175,13 +176,17 @@ df_ev = df_ev.sort_values(by=['Data_Dt', 'Horario']).reset_index(drop=False)
 
 df_f = df_ev[df_ev['Departamento'].isin(meus_deps)].copy()
 df_f = df_f[(df_f['Niv_N'] <= mapa_niveis_num.get(user['Nivel'], 0)) & (df_f['Data_Dt'].dt.date >= f_data)]
+
 if f_depto_pill != "Todos": df_f = df_f[df_f['Departamento'] == f_depto_pill]
 if f_nivel != "Todos": df_f = df_f[df_f['Nível'].astype(str).str.strip() == f_nivel]
 
+# LÓGICA DO FILTRO DE STATUS ATUALIZADA
 if filtro_status == "Minhas Inscrições":
     df_f = df_f[(df_f['Voluntário 1'].astype(str).str.lower() == user['Nome'].lower()) | (df_f['Voluntário 2'].astype(str).str.lower() == user['Nome'].lower())]
 elif filtro_status == "Vagas Abertas":
     df_f = df_f[df_f.apply(lambda x: str(x['Voluntário 1']).strip() == "" or str(x['Voluntário 2']).strip() == "", axis=1)]
+elif filtro_status == "Vagas Vazias":
+    df_f = df_f[(df_f['Voluntário 1'].astype(str).strip() == "") & (df_f['Voluntário 2'].astype(str).strip() == "")]
 
 # Renderização
 for i, row in df_f.iterrows():
