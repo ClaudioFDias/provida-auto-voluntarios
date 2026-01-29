@@ -28,7 +28,9 @@ def get_gspread_client():
     except Exception:
         st.error("Erro de conexão."); st.stop()
 
-def load_data():
+# Adicionado TTL para evitar estourar a cota da API do Google
+@st.cache_data(ttl=600) 
+def load_data_cached():
     client = get_gspread_client()
     ss = client.open_by_key("1paP1ZB2ufwCc95T_gdCR92kx-suXbROnDfbWMC_ka0c")
     sheet_ev = ss.worksheet("Calendario_Eventos")
@@ -38,7 +40,13 @@ def load_data():
     data_us = sheet_us.get_all_records()
     df_us = pd.DataFrame(data_us) if data_us else pd.DataFrame(columns=['Email', 'Nome', 'Telefone', 'Departamentos', 'Nivel'])
     df_us.columns = [c.strip() for c in df_us.columns]
-    return sheet_ev, sheet_us, df_ev, df_us
+    return df_ev, df_us
+
+# Função para pegar as instâncias das planilhas (sem cache para permitir escrita)
+def get_sheets():
+    client = get_gspread_client()
+    ss = client.open_by_key("1paP1ZB2ufwCc95T_gdCR92kx-suXbROnDfbWMC_ka0c")
+    return ss.worksheet("Calendario_Eventos"), ss.worksheet("Usuarios")
 
 # --- 2. CONFIGURAÇÕES ---
 cores_niveis = {
@@ -53,13 +61,13 @@ dias_semana = {"Monday": "Seg", "Tuesday": "Ter", "Wednesday": "Qua", "Thursday"
 @st.dialog("Conflito de Agenda")
 def conflito_dialog(evento_nome, horario):
     st.warning("⚠️ **Você já possui uma atividade neste horário!**")
-    st.write(f"Não é possível se inscrever em dois eventos simultâneos.")
+    st.write("Não é possível se inscrever em dois eventos simultâneos.")
     st.info(f"Evento conflitante: **{evento_nome}** às **{horario}**")
     if st.button("Entendido", type="primary", width="stretch"):
         st.rerun()
 
 @st.dialog("Confirmar Alteração de Cadastro")
-def confirmar_edicao_dialog(sheet, linha, novos_dados):
+def confirmar_edicao_dialog(linha, novos_dados):
     st.markdown("### Verifique seus novos dados:")
     st.markdown(f"**Nome:** {novos_dados[1]}")
     st.markdown(f"**Telefone:** {novos_dados[2]}")
@@ -67,21 +75,23 @@ def confirmar_edicao_dialog(sheet, linha, novos_dados):
     st.markdown(f"**Departamentos:** {novos_dados[3]}")
     st.info("Ao confirmar, o app será atualizado para refletir essas mudanças.")
     if st.button("Confirmar e Salvar", type="primary", width="stretch"):
-        sheet.update(f"A{linha}:E{linha}", [novos_dados])
+        _, sheet_us = get_sheets()
+        sheet_us.update(f"A{linha}:E{linha}", [novos_dados])
         st.session_state.user = {"Email": novos_dados[0], "Nome": novos_dados[1], "Telefone": novos_dados[2], "Departamentos": novos_dados[3], "Nivel": novos_dados[4]}
         st.session_state.modo_edicao = False
-        st.cache_resource.clear(); st.success("Perfil atualizado!"); st.rerun()
+        st.cache_data.clear(); st.success("Perfil atualizado!"); st.rerun()
 
 @st.dialog("Confirmar Inscrição")
-def confirmar_dialog(sheet, linha, row, vaga_n, col_idx):
+def confirmar_dialog(linha, row, col_idx):
     dia_pt = dias_semana.get(row['Data_Dt'].strftime('%A'), "")
     st.markdown(f"### {row['Nível']} - {row['Nome do Evento']}")
     st.write(f"📅 **Data:** {dia_pt} - {row['Data_Dt'].strftime('%d/%m/%Y')}")
     st.write(f"⏰ **Horário:** {row['Horario']} | 🏢 **Depto:** {row['Departamento']}")
     st.divider()
     if st.button("Confirmar Inscrição", type="primary", width="stretch"):
-        sheet.update_cell(linha, col_idx, st.session_state.user['Nome'])
-        st.cache_resource.clear(); st.rerun()
+        sheet_ev, _ = get_sheets()
+        sheet_ev.update_cell(linha, col_idx, st.session_state.user['Nome'])
+        st.cache_data.clear(); st.rerun()
 
 # --- 4. STYLE ---
 st.set_page_config(page_title="ProVida Escala", layout="centered")
@@ -99,7 +109,8 @@ st.markdown("""
 if 'user' not in st.session_state: st.session_state.user = None
 if 'modo_edicao' not in st.session_state: st.session_state.modo_edicao = False
 
-sheet_ev, sheet_us, df_ev, df_us = load_data()
+# Carregamento inicial
+df_ev, df_us = load_data_cached()
 deps_na_planilha = sorted([d for d in df_ev['Departamento'].unique() if str(d).strip() != ""])
 
 # --- 5. ACESSO / LOGIN / EDIÇÃO ---
@@ -126,7 +137,7 @@ if st.session_state.user is None:
                 niv_l = list(cores_niveis.keys())
                 niv_e = st.selectbox("Nível:", niv_l, index=niv_l.index(dados['Nivel']) if dados['Nivel'] in niv_l else 0)
                 if st.form_submit_button("Revisar Alterações", type="primary", width="stretch"):
-                    confirmar_edicao_dialog(sheet_us, st.session_state['edit_idx'], [dados['Email'], n_e, t_e, ",".join(d_e), niv_e])
+                    confirmar_edicao_dialog(st.session_state['edit_idx'], [dados['Email'], n_e, t_e, ",".join(d_e), niv_e])
         if st.button("Voltar"): 
             st.session_state.modo_edicao = False; st.rerun()
     else:
@@ -142,9 +153,10 @@ if st.session_state.user is None:
                 dc = st.multiselect("Departamentos:", options=deps_na_planilha)
                 nv = st.selectbox("Nível:", list(cores_niveis.keys()))
                 if st.form_submit_button("Cadastrar"):
+                    _, sheet_us = get_sheets()
                     sheet_us.append_row([st.session_state['novo_em'], nc, tc, ",".join(dc), nv])
                     st.session_state.user = {"Email": st.session_state['novo_em'], "Nome": nc, "Telefone": tc, "Departamentos": ",".join(dc), "Nivel": nv}
-                    st.cache_resource.clear(); st.rerun()
+                    st.cache_data.clear(); st.rerun()
         st.divider()
         if st.button("⚙️ Alterar Meus Dados"): st.session_state.modo_edicao = True; st.rerun()
     st.stop()
@@ -179,9 +191,8 @@ df_f = df_f[(df_f['Niv_N'] <= mapa_niveis_num.get(user['Nivel'], 0)) & (df_f['Da
 if f_depto_pill != "Todos": df_f = df_f[df_f['Departamento'] == f_depto_pill]
 if f_nivel != "Todos": df_f = df_f[df_f['Nível'].astype(str).str.strip() == f_nivel]
 
-# Lógica de Filtros (Corrigida com .str)
+# Lógica de Filtros
 nome_u_comp = user['Nome'].lower().strip()
-
 if filtro_status == "Minhas Inscrições":
     df_f = df_f[(df_f['Voluntário 1'].astype(str).str.lower().str.strip() == nome_u_comp) | 
                 (df_f['Voluntário 2'].astype(str).str.lower().str.strip() == nome_u_comp)]
@@ -215,24 +226,23 @@ for i, row in df_f.iterrows():
         </div>
     """, unsafe_allow_html=True)
 
-    ja_in = (v1.lower() == user['Nome'].lower().strip() or v2.lower() == user['Nome'].lower().strip())
+    ja_in = (v1.lower() == nome_u_comp or v2.lower() == nome_u_comp)
     if ja_in: st.button("✅ INSCRITO", key=f"bi_{i}", disabled=True, width="stretch")
     elif v1 and v2: st.button("🚫 CHEIO", key=f"bf_{i}", disabled=True, width="stretch")
     else:
         if st.button("Quero me inscrever", key=f"bq_{i}", type="primary", width="stretch"):
-            nome_u = user['Nome'].lower().strip()
             conflito = df_ev[
                 (df_ev['Data Específica'] == row['Data Específica']) & 
                 (df_ev['Horario'] == row['Horario']) & 
-                ((df_ev['Voluntário 1'].astype(str).str.lower().str.strip() == nome_u) | 
-                 (df_ev['Voluntário 2'].astype(str).str.lower().str.strip() == nome_u))
+                ((df_ev['Voluntário 1'].astype(str).str.lower().str.strip() == nome_u_comp) | 
+                 (df_ev['Voluntário 2'].astype(str).str.lower().str.strip() == nome_u_comp))
             ]
             
             if not conflito.empty:
                 conflito_dialog(conflito.iloc[0]['Nome do Evento'], conflito.iloc[0]['Horario'])
             else:
                 v_alvo, c_alvo = ("Voluntário 1", 8) if v1 == "" else ("Voluntário 2", 9)
-                confirmar_dialog(sheet_ev, int(row['index'])+2, row, v_alvo, c_alvo)
+                confirmar_dialog(int(row['index'])+2, row, c_alvo)
 
 st.divider()
 if st.button("Sair"): st.session_state.user = None; st.rerun()
