@@ -61,7 +61,11 @@ def conflito_dialog(evento_nome, horario):
 @st.dialog("Confirmar Alteração de Cadastro")
 def confirmar_edicao_dialog(sheet, linha, novos_dados):
     st.markdown("### Verifique seus novos dados:")
-    st.markdown(f"- **Nome:** {novos_dados[1]}\n- **Telefone:** {novos_dados[2]}\n- **Nível:** {novos_dados[4]}\n- **Departamentos:** {novos_dados[3]}")
+    st.markdown(f"**Nome:** {novos_dados[1]}")
+    st.markdown(f"**Telefone:** {novos_dados[2]}")
+    st.markdown(f"**Nível:** {novos_dados[4]}")
+    st.markdown(f"**Departamentos:** {novos_dados[3]}")
+    st.info("Ao confirmar, o app será atualizado para refletir essas mudanças.")
     if st.button("Confirmar e Salvar", type="primary", width="stretch"):
         sheet.update(f"A{linha}:E{linha}", [novos_dados])
         st.session_state.user = {"Email": novos_dados[0], "Nome": novos_dados[1], "Telefone": novos_dados[2], "Departamentos": novos_dados[3], "Nivel": novos_dados[4]}
@@ -73,7 +77,7 @@ def confirmar_dialog(sheet, linha, row, vaga_n, col_idx):
     dia_pt = dias_semana.get(row['Data_Dt'].strftime('%A'), "")
     st.markdown(f"### {row['Nível']} - {row['Nome do Evento']}")
     st.write(f"📅 **Data:** {dia_pt} - {row['Data_Dt'].strftime('%d/%m/%Y')}")
-    st.write(f"⏰ **Horário:** {row['Horario']}")
+    st.write(f"⏰ **Horário:** {row['Horario']} | 🏢 **Depto:** {row['Departamento']}")
     st.divider()
     if st.button("Confirmar Inscrição", type="primary", width="stretch"):
         sheet.update_cell(linha, col_idx, st.session_state.user['Nome'])
@@ -87,7 +91,8 @@ st.markdown("""
     .card-container { padding: 15px; border-radius: 12px 12px 0 0; border: 1px solid #ddd; margin-top: 15px; }
     .card-header { display: flex; justify-content: space-between; align-items: center; font-weight: 800; }
     .card-title { margin: 8px 0; font-size: 1.45em; line-height: 1.2; }
-    .voluntarios-box { background: rgba(0,0,0,0.07); padding: 10px; border-radius: 8px; font-size: 1rem; }
+    .voluntarios-box { background: rgba(0,0,0,0.07); padding: 10px; border-radius: 8px; font-size: 1.05rem; line-height: 1.6; }
+    .data-text { font-size: 1.3em; font-weight: 800; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -156,7 +161,12 @@ if not meus_deps:
 
 filtro_status = st.pills("Status:", ["Vagas Abertas", "Minhas Inscrições", "Tudo"], default="Vagas Abertas")
 f_depto_pill = st.pills("Departamento:", ["Todos"] + meus_deps, default="Todos")
-f_data = st.date_input("A partir de:", value=date.today())
+
+c1, c2 = st.columns(2)
+with c1:
+    f_nivel = st.selectbox("Filtrar por Nível:", ["Todos"] + list(cores_niveis.keys()))
+with c2:
+    f_data = st.date_input("A partir de:", value=date.today())
 
 # Processamento
 df_ev['Data_Dt'] = pd.to_datetime(df_ev['Data Específica'], errors='coerce', dayfirst=True)
@@ -166,6 +176,7 @@ df_ev = df_ev.sort_values(by=['Data_Dt', 'Horario']).reset_index(drop=False)
 df_f = df_ev[df_ev['Departamento'].isin(meus_deps)].copy()
 df_f = df_f[(df_f['Niv_N'] <= mapa_niveis_num.get(user['Nivel'], 0)) & (df_f['Data_Dt'].dt.date >= f_data)]
 if f_depto_pill != "Todos": df_f = df_f[df_f['Departamento'] == f_depto_pill]
+if f_nivel != "Todos": df_f = df_f[df_f['Nível'].astype(str).str.strip() == f_nivel]
 
 if filtro_status == "Minhas Inscrições":
     df_f = df_f[(df_f['Voluntário 1'].astype(str).str.lower() == user['Nome'].lower()) | (df_f['Voluntário 2'].astype(str).str.lower() == user['Nome'].lower())]
@@ -178,13 +189,20 @@ for i, row in df_f.iterrows():
     bg = cores_niveis.get(str(row['Nível']).strip(), "#FFFFFF")
     tx = "#FFFFFF" if "AV2" in str(row['Nível']) else "#000000"
     st_vaga = "🟢 Cheio" if v1 and v2 else ("🟡 1 Vaga" if v1 or v2 else "🔴 2 Vagas")
+    dia_abreviado = dias_semana.get(row['Data_Dt'].strftime('%A'), "")
     
     st.markdown(f"""
         <div class="card-container" style="background-color: {bg}; color: {tx};">
-            <div class="card-header"><span>{st_vaga}</span><span>{row['Data_Dt'].strftime('%d/%m')}</span></div>
+            <div class="card-header">
+                <span style="opacity: 0.8;">{st_vaga}</span>
+                <span class="data-text">{dia_abreviado} - {row['Data_Dt'].strftime('%d/%m')}</span>
+            </div>
             <h2 class="card-title" style="color: {tx};">{row['Nível']} - {row['Nome do Evento']}</h2>
             <div style="font-weight: 800; margin-bottom: 10px;">🏢 {row['Departamento']} | ⏰ {row['Horario']}</div>
-            <div class="voluntarios-box"><b>V1:</b> {v1 if v1 else "---"} | <b>V2:</b> {v2 if v2 else "---"}</div>
+            <div class="voluntarios-box">
+                <b>Voluntário 1:</b> {v1 if v1 else "---"}<br>
+                <b>Voluntário 2:</b> {v2 if v2 else "---"}
+            </div>
         </div>
     """, unsafe_allow_html=True)
 
@@ -202,7 +220,6 @@ for i, row in df_f.iterrows():
             ]
             
             if not conflito.empty:
-                # ACIONA POP-UP DE CONFLITO
                 conflito_dialog(conflito.iloc[0]['Nome do Evento'], conflito.iloc[0]['Horario'])
             else:
                 v_alvo, c_alvo = ("Voluntário 1", 8) if v1 == "" else ("Voluntário 2", 9)
