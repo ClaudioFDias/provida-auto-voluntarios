@@ -159,7 +159,6 @@ if not meus_deps:
     if st.button("Sair"): st.session_state.user = None; st.rerun()
     st.stop()
 
-# ATUALIZAÇÃO DO FILTRO DE STATUS
 filtro_status = st.pills("Status:", ["Vagas Abertas", "Vagas Vazias", "Minhas Inscrições", "Tudo"], default="Vagas Abertas")
 f_depto_pill = st.pills("Departamento:", ["Todos"] + meus_deps, default="Todos")
 
@@ -180,13 +179,18 @@ df_f = df_f[(df_f['Niv_N'] <= mapa_niveis_num.get(user['Nivel'], 0)) & (df_f['Da
 if f_depto_pill != "Todos": df_f = df_f[df_f['Departamento'] == f_depto_pill]
 if f_nivel != "Todos": df_f = df_f[df_f['Nível'].astype(str).str.strip() == f_nivel]
 
-# LÓGICA DO FILTRO DE STATUS ATUALIZADA
+# Lógica de Filtros (Corrigida com .str)
+nome_u_comp = user['Nome'].lower().strip()
+
 if filtro_status == "Minhas Inscrições":
-    df_f = df_f[(df_f['Voluntário 1'].astype(str).str.lower() == user['Nome'].lower()) | (df_f['Voluntário 2'].astype(str).str.lower() == user['Nome'].lower())]
+    df_f = df_f[(df_f['Voluntário 1'].astype(str).str.lower().str.strip() == nome_u_comp) | 
+                (df_f['Voluntário 2'].astype(str).str.lower().str.strip() == nome_u_comp)]
 elif filtro_status == "Vagas Abertas":
-    df_f = df_f[df_f.apply(lambda x: str(x['Voluntário 1']).strip() == "" or str(x['Voluntário 2']).strip() == "", axis=1)]
+    df_f = df_f[(df_f['Voluntário 1'].astype(str).str.strip() == "") | 
+                (df_f['Voluntário 2'].astype(str).str.strip() == "")]
 elif filtro_status == "Vagas Vazias":
-    df_f = df_f[(df_f['Voluntário 1'].astype(str).strip() == "") & (df_f['Voluntário 2'].astype(str).strip() == "")]
+    df_f = df_f[(df_f['Voluntário 1'].astype(str).str.strip() == "") & 
+                (df_f['Voluntário 2'].astype(str).str.strip() == "")]
 
 # Renderização
 for i, row in df_f.iterrows():
@@ -211,17 +215,17 @@ for i, row in df_f.iterrows():
         </div>
     """, unsafe_allow_html=True)
 
-    ja_in = (v1.lower() == user['Nome'].lower() or v2.lower() == user['Nome'].lower())
+    ja_in = (v1.lower() == user['Nome'].lower().strip() or v2.lower() == user['Nome'].lower().strip())
     if ja_in: st.button("✅ INSCRITO", key=f"bi_{i}", disabled=True, width="stretch")
     elif v1 and v2: st.button("🚫 CHEIO", key=f"bf_{i}", disabled=True, width="stretch")
     else:
         if st.button("Quero me inscrever", key=f"bq_{i}", type="primary", width="stretch"):
-            nome_u = user['Nome'].lower()
+            nome_u = user['Nome'].lower().strip()
             conflito = df_ev[
                 (df_ev['Data Específica'] == row['Data Específica']) & 
                 (df_ev['Horario'] == row['Horario']) & 
-                ((df_ev['Voluntário 1'].astype(str).str.lower() == nome_u) | 
-                 (df_ev['Voluntário 2'].astype(str).str.lower() == nome_u))
+                ((df_ev['Voluntário 1'].astype(str).str.lower().str.strip() == nome_u) | 
+                 (df_ev['Voluntário 2'].astype(str).str.lower().str.strip() == nome_u))
             ]
             
             if not conflito.empty:
